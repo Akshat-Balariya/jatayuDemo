@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field-to-Record</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">F→R</div>
+    <div>
+      <h1>Field-to-Record</h1>
+      <div class="sub">Voice → structured, signed medication &amp; procedure record · runs fully offline</div>
+    </div>
+  </div>
+  <div class="status" id="status">
+    <span class="pill" id="st-llm">LLM …</span>
+    <span class="pill" id="st-asr">ASR …</span>
+    <span class="pill" id="st-chain">Chain …</span>
+  </div>
+</header>
+
+<main>
+  <section class="card" id="capture">
+    <h2><span class="step">1</span> Capture</h2>
+    <div class="grid3">
+      <label>Incident ID<input id="incident"></label>
+      <label>Responder ID<input id="responder" value="EMT-042"></label>
+      <label>Language
+        <select id="lang">
+          <option value="auto">Auto-detect</option>
+          <option value="en">English</option>
+          <option value="hinglish">Hinglish</option>
+          <option value="hi">Hindi (हिन्दी)</option>
+        </select>
+      </label>
+    </div>
+    <div class="recorder">
+      <button id="rec" class="rec-btn" title="Hold the mic to the speaker and press to record">
+        <span class="dot"></span><span id="rec-label">Record</span>
+      </button>
+      <span id="rec-timer" class="muted">00:00</span>
+      <span id="asr-info" class="muted"></span>
+    </div>
+    <label class="full">Transcript / typed note
+      <textarea id="note" rows="6" placeholder="Dictate, or type e.g. &quot;5 minute pehle adrenaline 0.5 mg IM right thigh mein diya, IV 18G left hand, NS start kiya, BP 90/60&quot;"></textarea>
+    </label>
+    <div class="row">
+      <select id="samples"><option value="">Load a sample note…</option></select>
+      <span class="spacer"></span>
+      <button id="extract" class="primary">Extract record →</button>
+    </div>
+    <div id="extract-info" class="muted small"></div>
+  </section>
+
+  <section class="card" id="review">
+    <h2><span class="step">2</span> Review &amp; edit <span class="muted small" id="warn-count"></span></h2>
+    <div id="review-empty" class="empty">Extracted medications, procedures and vitals will appear here for the responder to check.</div>
+    <div id="review-body" hidden>
+      <div class="grid4">
+        <label>Age<input id="p-age"></label>
+        <label>Sex<select id="p-sex"><option>unknown</option><option>male</option><option>female</option></select></label>
+        <label>Weight (kg)<input id="p-wt" type="number" step="0.1"></label>
+        <label>Chief complaint<input id="p-cc"></label>
+      </div>
+
+      <h3>Medications administered <button class="link" data-add="medications">+ add</button></h3>
+      <div class="table-wrap"><table id="t-meds">
+        <thead><tr><th>Time</th><th>Drug</th><th>Dose</th><th>Unit</th><th>Route</th><th>Site</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+
+      <h3>Procedures <button class="link" data-add="procedures">+ add</button></h3>
+      <div class="table-wrap"><table id="t-procs">
+        <thead><tr><th>Time</th><th>Procedure</th><th>Details</th><th>Site</th><th>Outcome</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+
+      <h3>Vitals <button class="link" data-add="vitals">+ add</button></h3>
+      <div class="table-wrap"><table id="t-vitals">
+        <thead><tr><th>Time</th><th>Type</th><th>Value</th><th>Unit</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+
+      <div class="row sign-row">
+        <label class="check"><input type="checkbox" id="confirm"> I confirm this record reflects care I provided.</label>
+        <span class="spacer"></span>
+        <button id="sign" class="primary" disabled>Confirm &amp; sign</button>
+      </div>
+      <div id="signed" class="signed" hidden></div>
+    </div>
+  </section>
+
+  <section class="card wide" id="history">
+    <h2><span class="step">3</span> Audit chain
+      <span class="spacer"></span>
+      <button id="verify" class="ghost">Verify chain</button>
+    </h2>
+    <div id="verify-result" class="small"></div>
+    <div class="table-wrap"><table id="t-history">
+      <thead><tr><th>#</th><th>Signed</th><th>Incident</th><th>Responder</th><th>Meds</th><th>Procs</th><th>Edits</th><th>Hash</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+</main>
+<footer class="muted small">Documentation aid only — not clinical decision support. Synthetic data only; no real PHI.</footer>
+<script src="app.js"></script>
+</body>
+</html>

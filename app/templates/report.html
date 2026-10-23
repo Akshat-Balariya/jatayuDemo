@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Patient Care Record {{ rec.incident_id }}</title>
+<style>
+  body { font: 13px/1.45 "Segoe UI", system-ui, sans-serif; color: #1a1a1a; margin: 32px auto; max-width: 820px; padding: 0 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: #555; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-top: 24px; }
+  .meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 16px; margin-top: 12px; }
+  .meta div span { color: #666; display: block; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { font-size: 11px; color: #666; font-weight: 600; }
+  .muted { color: #777; }
+  .edited { background: #fff6d6; }
+  .hash { font-family: Consolas, monospace; font-size: 11px; word-break: break-all; }
+  .transcript { white-space: pre-wrap; background: #f6f6f6; padding: 10px; border-radius: 6px; }
+  .print { float: right; }
+  @media print { .print { display: none; } body { margin: 0; } }
+</style>
+</head>
+<body>
+<button class="print" onclick="window.print()">Print / Save PDF</button>
+<h1>Pre-hospital Medication &amp; Procedure Record</h1>
+<div class="muted">Generated on-device by Field-to-Record &middot; responder-confirmed</div>
+
+<div class="meta">
+  <div><span>Incident</span>{{ rec.incident_id }}</div>
+  <div><span>Responder</span>{{ rec.responder_id }}</div>
+  <div><span>Device</span>{{ rec.device_id }}</div>
+  <div><span>Captured</span>{{ f.reference_time | dt }}</div>
+  <div><span>Signed</span>{{ rec.created_at | dt }}</div>
+  <div><span>Language</span>{{ rec.language or "-" }}</div>
+  <div><span>Patient</span>{{ f.patient.age or "?" }} y, {{ f.patient.sex }}{% if f.patient.weight_kg %}, {{ f.patient.weight_kg }} kg{% endif %}</div>
+  <div style="grid-column: span 2"><span>Chief complaint</span>{{ f.chief_complaint or "-" }}</div>
+</div>
+
+<h2>Medications administered</h2>
+{% if f.medications %}
+<table>
+  <tr><th>Time</th><th>Drug</th><th>Dose</th><th>Route</th><th>Site</th><th>RxNorm</th></tr>
+  {% for m in f.medications %}
+  <tr class="{{ 'edited' if ('medications[%d]' % loop.index0) in edited else '' }}">
+    <td>{{ m.time | hm }}</td><td><b>{{ m.drug }}</b></td>
+    <td>{{ m.dose_value | num }} {{ m.dose_unit or "" }}</td>
+    <td>{{ m.route or "-" }}</td><td>{{ m.site or "-" }}</td><td class="muted">{{ m.rxnorm or "-" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">None recorded.</p>{% endif %}
+
+<h2>Procedures</h2>
+{% if f.procedures %}
+<table>
+  <tr><th>Time</th><th>Procedure</th><th>Details</th><th>Site</th><th>Outcome</th></tr>
+  {% for p in f.procedures %}
+  <tr class="{{ 'edited' if ('procedures[%d]' % loop.index0) in edited else '' }}">
+    <td>{{ p.time | hm }}</td><td><b>{{ p.name }}</b></td><td>{{ p.details or "-" }}</td>
+    <td>{{ p.site or "-" }}</td><td>{{ p.outcome or "-" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">None recorded.</p>{% endif %}
+
+<h2>Vitals</h2>
+{% if f.vitals %}
+<table>
+  <tr><th>Time</th><th>Vital</th><th>Value</th></tr>
+  {% for v in f.vitals %}<tr><td>{{ v.time | hm }}</td><td>{{ v.type }}</td><td>{{ v.value }} {{ v.unit or "" }}</td></tr>{% endfor %}
+</table>
+{% else %}<p class="muted">None recorded.</p>{% endif %}
+
+<h2>Source dictation</h2>
+<div class="transcript">{{ rec.transcript }}</div>
+
+<h2>Audit</h2>
+<table>
+  <tr><th>Record</th><td class="hash">{{ rec.id }} (seq {{ rec.seq }})</td></tr>
+  <tr><th>Hash</th><td class="hash">{{ rec.hash }}</td></tr>
+  <tr><th>Previous hash</th><td class="hash">{{ rec.prev_hash }}</td></tr>
+  <tr><th>Transcript SHA-256</th><td class="hash">{{ rec.transcript_sha256 }}</td></tr>
+  <tr><th>Audio SHA-256</th><td class="hash">{{ rec.audio_sha256 or "typed note (no audio)" }}</td></tr>
+  <tr><th>Models</th><td class="hash">{{ rec.model_info | tojson }}</td></tr>
+  <tr><th>Human edits</th><td>{{ rec.edits | length }} field(s) changed from machine draft{% if rec.edits %} (highlighted){% endif %}</td></tr>
+</table>
+{% if rec.edits %}
+<table>
+  <tr><th>Field</th><th>Machine</th><th>Responder</th></tr>
+  {% for e in rec.edits %}<tr><td class="hash">{{ e.field }}</td><td>{{ e.machine }}</td><td>{{ e.human }}</td></tr>{% endfor %}
+</table>
+{% endif %}
+<p class="muted" style="margin-top:24px">Documentation aid only. Not clinical decision support. Contains no real patient data.</p>
+</body>
+</html>

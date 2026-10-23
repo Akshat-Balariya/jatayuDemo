@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic>=2
+httpx
+jinja2
+faster-whisper
+# CUDA 12 runtime for faster-whisper on NVIDIA GPUs (Windows/Linux). Optional: CPU works without.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*
+pytest
