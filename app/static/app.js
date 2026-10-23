@@ -16,6 +16,7 @@ let draft = null;       // machine output, frozen
 let rec = null;         // record being edited
 let modelInfo = {};
 let asrMeta = null;     // {audio_sha256, language, ...}
+let noteTime = null;    // ISO time the note was recorded/started; unstated & relative times resolve against it
 
 // ---------- utils ----------
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -32,9 +33,18 @@ async function api(path, opts = {}) {
   if (!r.ok) throw new Error(body.detail || r.statusText);
   return body;
 }
+function localIso(d) {
+  const p = (n) => String(Math.abs(n)).padStart(2, "0"), off = -d.getTimezoneOffset();
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` +
+    `${off >= 0 ? "+" : "-"}${p(Math.trunc(off / 60))}:${p(off % 60)}`;
+}
+function setNoteTime(iso) {
+  noteTime = iso;
+  $("#note-time").value = hm(iso);
+}
 function newIncident() {
   const d = new Date(), p = (n) => String(n).padStart(2, "0");
-  $("#incident").value = `INC-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+  $("#incident").value = `INC-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
 // ---------- status ----------
@@ -42,10 +52,16 @@ async function refreshStatus() {
   try {
     const h = await api("/api/health");
     const set = (id, ok, text, cls) => { const el = $(id); el.textContent = text; el.className = "pill " + (cls || (ok ? "ok" : "bad")); };
-    set("#st-llm", h.llm.ok, h.llm.ok ? `LLM ${h.llm.model}` : `LLM ${h.llm.model} not ready`);
+    const l = h.llm;
+    if (!l.running) set("#st-llm", false, "LLM offline · Ollama not running");
+    else if (!l.installed) set("#st-llm", false, `LLM ${l.model} not installed`);
+    else if (!l.loaded) set("#st-llm", true, `LLM ${l.model} · loading…`, "warn");
+    else set("#st-llm", true, `LLM ${l.model} · ready`);
     set("#st-asr", true, h.asr.loaded ? `ASR ${h.asr.asr_model} · ${h.asr.asr_device}` : `ASR ${h.asr.asr_model} (loads on first use)`, h.asr.loaded ? "ok" : "warn");
     set("#st-chain", h.audit.ok, h.audit.ok ? `Chain OK · ${h.audit.count} records` : "Chain BROKEN");
-  } catch { $("#st-llm").textContent = "server offline"; }
+    if (!h.llm.ok && h.llm.error) $("#st-llm").title = h.llm.error;
+    return l.loaded;
+  } catch { $("#st-llm").textContent = "server offline"; $("#st-llm").className = "pill bad"; return false; }
 }
 
 // ---------- recording ----------
@@ -56,6 +72,8 @@ $("#rec").onclick = async () => {
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
   catch (e) { alert("Microphone not available: " + e.message); return; }
   chunks = [];
+  // the first recording of a note fixes its time; later recordings append to the same note
+  if (!noteTime || !$("#note").value.trim()) setNoteTime(localIso(new Date()));
   mediaRec = new MediaRecorder(stream);
   mediaRec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
   mediaRec.onstop = async () => {
@@ -94,7 +112,8 @@ $("#extract").onclick = async () => {
   btn.disabled = true; btn.textContent = "Extracting…";
   $("#extract-info").textContent = "";
   try {
-    const r = await api("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    if (!noteTime) setNoteTime(localIso(new Date()));
+    const r = await api("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, reference_time: noteTime }) });
     draft = r.record; rec = clone(r.record);
     modelInfo = { ...r.model_info, ...(asrMeta ? { asr_model: asrMeta.asr_model, asr_device: asrMeta.asr_device } : {}) };
     $("#extract-info").textContent = `${r.model_info.llm_model} · ${r.model_info.llm_latency_s}s`;
@@ -125,6 +144,7 @@ function renderReview() {
   $("#p-sex").value = rec.patient.sex;
   $("#p-wt").value = rec.patient.weight_kg ?? "";
   $("#p-cc").value = rec.chief_complaint ?? "";
+  $("#cc-meta").innerHTML = (rec.chief_complaint_warnings || []).map((w) => `<span class="chip">${esc(w)}</span>`).join("");
 
   $("#t-meds tbody").innerHTML = rec.medications.map((m, i) => `
     <tr class="item">
@@ -156,7 +176,8 @@ function renderReview() {
       <td>${del("vitals", i)}</td>
     </tr>${metaRow(v, 4)}`).join("");
 
-  const n = [...rec.medications, ...rec.procedures, ...rec.vitals].reduce((a, x) => a + (x.warnings?.length || 0), 0);
+  const n = [...rec.medications, ...rec.procedures, ...rec.vitals].reduce((a, x) => a + (x.warnings?.length || 0), 0)
+    + (rec.chief_complaint_warnings?.length || 0);
   $("#warn-count").textContent = n ? `· ${n} item${n > 1 ? "s" : ""} need attention` : "· no warnings";
   $("#confirm").checked = false;
   $("#sign").disabled = true;
@@ -235,9 +256,42 @@ $("#verify").onclick = async () => {
   refreshStatus();
 };
 
+// ---------- new entry ----------
+function resetEntry() {
+  $("#note").value = "";
+  noteTime = null; $("#note-time").value = "";
+  asrMeta = null; draft = null; rec = null; modelInfo = {};
+  $("#asr-info").textContent = ""; $("#extract-info").textContent = ""; $("#rec-timer").textContent = "00:00";
+  $("#review-body").hidden = true; $("#review-empty").hidden = false;
+  $("#signed").hidden = true; $("#warn-count").textContent = "";
+  newIncident();
+  $("#note").focus();
+}
+$("#new-entry").onclick = () => {
+  const unsigned = (rec && $("#signed").hidden) || (!rec && $("#note").value.trim());
+  if (unsigned && !confirm("Discard the current unsigned note and start a new entry?")) return;
+  resetEntry();
+};
+
+// typed notes: the note's time is when typing started
+$("#note").addEventListener("input", (e) => {
+  if (!e.target.value.trim()) { noteTime = null; $("#note-time").value = ""; }
+  else if (!noteTime) setNoteTime(localIso(new Date()));
+});
+$("#note-time").onchange = (e) => {
+  if (e.target.value) noteTime = (noteTime || localIso(new Date())).replace(/T\d\d:\d\d(:\d\d)?/, `T${e.target.value}:00`);
+};
+
 // ---------- init ----------
 for (const k of Object.keys(SAMPLES)) $("#samples").insertAdjacentHTML("beforeend", `<option>${esc(k)}</option>`);
-$("#samples").onchange = (e) => { if (SAMPLES[e.target.value]) { $("#note").value = SAMPLES[e.target.value]; asrMeta = null; } e.target.value = ""; };
+$("#samples").onchange = (e) => {
+  if (SAMPLES[e.target.value]) { $("#note").value = SAMPLES[e.target.value]; asrMeta = null; setNoteTime(localIso(new Date())); }
+  e.target.value = "";
+};
 newIncident();
-refreshStatus();
 loadHistory();
+// Poll fast until the local LLM is up, then slowly so the badges stay truthful.
+(async function pollStatus() {
+  const ok = await refreshStatus();
+  setTimeout(pollStatus, ok ? 30000 : 4000);
+})();

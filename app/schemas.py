@@ -49,6 +49,7 @@ class LLMPatient(BaseModel):
 class LLMExtraction(BaseModel):
     patient: LLMPatient = LLMPatient()
     chief_complaint: Optional[str] = None
+    chief_complaint_evidence: Optional[str] = None
     medications: list[LLMMedication] = []
     procedures: list[LLMProcedure] = []
     vitals: list[LLMVital] = []
@@ -100,6 +101,7 @@ class ClinicalRecord(BaseModel):
     reference_time: str  # ISO time the note was captured; relative times resolve against it
     patient: LLMPatient = LLMPatient()
     chief_complaint: Optional[str] = None
+    chief_complaint_warnings: list[str] = []
     medications: list[Medication] = []
     procedures: list[Procedure] = []
     vitals: list[Vital] = []

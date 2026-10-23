@@ -92,8 +92,9 @@ def canonical_unit(raw: str | None) -> str | None:
 # ---------- time ----------
 
 _REL_RE = re.compile(
-    r"(\d+(?:\.\d+)?)\s*(min|mins|minute|minutes|मिनट|hr|hrs|hour|hours|घंटे|घंटा)\s*"
-    r"(ago|back|before|earlier|pehle|pahle|पहले)",
+    r"(\d+(?:\.\d+)?)\s*(min|mins|minute|minutes|minat|mint|मिनट|hr|hrs|hour|hours|ghante|ghanta|घंटे|घंटा)\s*"
+    # includes common speech-to-text spellings of "pehle" (before)
+    r"(ago|back|before|earlier|pehle|pahle|pehele|pehale|pelle|pele|phele|paile|pehel|पहले)",
     re.I,
 )
 _CLOCK_RE = re.compile(r"\b(\d{1,2})[:.](\d{2})\s*(am|pm)?\b|\b([01]\d|2[0-3])([0-5]\d)\s*(hrs|hours|h)\b", re.I)
@@ -105,7 +106,7 @@ _NOW_WORDS =("now", "just now", "abhi", "अभी", "right now", "on arrival", 
 def resolve_time(raw: str | None, ref: datetime) -> tuple[str | None, str | None]:
     """Return (iso_time, warning)."""
     if not raw or not raw.strip():
-        return ref.isoformat(timespec="seconds"), "time not stated; using capture time"
+        return ref.isoformat(timespec="seconds"), "time not stated; using recording time"
     text = _clean(raw)
     m = _REL_RE.search(text)
     if m:
@@ -131,7 +132,7 @@ def resolve_time(raw: str | None, ref: datetime) -> tuple[str | None, str | None
         return t.isoformat(timespec="seconds"), None
     if any(w in text for w in _NOW_WORDS):
         return ref.isoformat(timespec="seconds"), None
-    return ref.isoformat(timespec="seconds"), f"could not parse time '{raw}'; using capture time"
+    return ref.isoformat(timespec="seconds"), f"could not parse time '{raw}'; using recording time"
 
 
 # ---------- evidence ----------
@@ -185,18 +186,40 @@ def _is_null(s: str | None) -> bool:
     return s is None or _clean(s) in _NULLS
 
 
-def _ground_drug(llm_drug: str, evidence: str | None, warnings: list[str]) -> tuple[str | None, str | None, bool]:
-    """Cross-check the LLM's drug name against the drug actually named in its evidence quote."""
+_SENTENCE_RE = re.compile(r"[^.!?।\n]+")
+
+
+def _sentence_of(evidence: str | None, transcript: str) -> str:
+    """The transcript sentence the evidence quote was taken from (best token overlap)."""
+    ev = set(re.findall(r"\w+", _clean(evidence or "")))
+    best, score = "", 0
+    for sent in _SENTENCE_RE.findall(transcript):
+        overlap = len(ev & set(re.findall(r"\w+", _clean(sent))))
+        if overlap > score:
+            best, score = sent, overlap
+    return best
+
+
+def _ground_drug(llm_drug: str, evidence: str | None, transcript: str,
+                 warnings: list[str]) -> tuple[str | None, str | None, bool]:
+    """Cross-check the LLM's drug name against the drug actually named where its evidence came from.
+
+    The quote is checked first; if the model trimmed the drug name out of its quote
+    (e.g. "10 minute pehle 650 mg diya" from "10 minute pehle Dolo 650 mg diya"), the full
+    transcript sentence is checked instead.
+    """
     canon, rxcui, exact = canonical_drug(llm_drug)
-    in_ev = mentions(evidence, _DRUG_IDX)
-    if canon and (canon in in_ev or not in_ev):
+    in_ev = mentions(evidence, _DRUG_IDX) or mentions(_sentence_of(evidence, transcript), _DRUG_IDX)
+    if canon and canon in in_ev:
         return canon, rxcui, exact
     if len(in_ev) == 1:
         fixed = in_ev.pop()
         warnings.append(f"model said '{llm_drug}', transcript says {fixed} - corrected")
         return fixed, DRUGS[fixed][0], True
-    if canon and in_ev:
-        warnings.append(f"'{llm_drug}' not named in its evidence - verify")
+    if in_ev:
+        warnings.append(f"'{llm_drug}' not named in its sentence - verify")
+    elif canon and not mentions(transcript, _DRUG_IDX) & {canon}:
+        warnings.append(f"'{llm_drug}' not named anywhere in the transcript - verify")
     return canon, rxcui, exact
 
 
@@ -216,7 +239,7 @@ def normalize(ext: LLMExtraction, transcript: str, ref: datetime) -> ClinicalRec
         if _is_null(m.drug) or _is_null(m.evidence):
             continue
         warnings: list[str] = []
-        canon, rxcui, exact = _ground_drug(m.drug, m.evidence, warnings)
+        canon, rxcui, exact = _ground_drug(m.drug, m.evidence, transcript, warnings)
         if canon is None:
             warnings.append(f"unrecognised drug '{m.drug}' - verify")
         elif not exact:
@@ -255,7 +278,9 @@ def normalize(ext: LLMExtraction, transcript: str, ref: datetime) -> ClinicalRec
         canon, code, exact = canonical_procedure(p.name)
         in_ev = mentions(p.evidence, _PROC_IDX)
         if canon not in in_ev and not in_ev:
-            if drugs := mentions(p.evidence, _DRUG_IDX):
+            drugs = {d for d in mentions(p.evidence, _DRUG_IDX)
+                     if d in _NO_DOSE_OK or _DOSE_RE.search(_clean(p.evidence))}  # a measurement is not a dose
+            if drugs:
                 # e.g. "NS 500 ml start kiya" filed as a procedure: it is really a drug administration
                 meds.extend(_med_from_phrase(d, p, transcript, ref) for d in drugs
                             if not any(m.evidence == p.evidence and m.drug == d for m in meds))
@@ -303,9 +328,12 @@ def normalize(ext: LLMExtraction, transcript: str, ref: datetime) -> ClinicalRec
                             evidence=v.evidence, evidence_found=found, warnings=warnings))
 
     _apply_implications(meds, procs, vitals, ref)
+    cc_warnings = []
+    if ext.chief_complaint and not evidence_in_transcript(ext.chief_complaint_evidence, transcript):
+        cc_warnings.append("complaint not found in transcript - verify")
     return ClinicalRecord(
         reference_time=ref.isoformat(timespec="seconds"),
-        patient=ext.patient, chief_complaint=ext.chief_complaint,
+        patient=ext.patient, chief_complaint=ext.chief_complaint, chief_complaint_warnings=cc_warnings,
         medications=meds, procedures=procs, vitals=vitals,
     )
 

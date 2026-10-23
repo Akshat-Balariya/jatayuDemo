@@ -6,6 +6,7 @@ Metrics (micro-averaged, multiset matching so repeated doses count):
   drug       - canonical drug name correct
   full_med   - drug + dose value + unit + route all correct (the safety-relevant number)
   procedure  - canonical procedure name correct
+  complaint  - for notes labelled with it, the chief complaint names the right body part
 """
 from __future__ import annotations
 
@@ -55,7 +56,7 @@ def main():
 
     totals = {k: [0, 0, 0] for k in ("drug", "full_med", "procedure")}
     by_lang: dict[str, dict] = {}
-    latencies, details = [], []
+    latencies, details, complaint_hits = [], [], []
     ref = datetime.now().astimezone()
 
     for c in cases:
@@ -76,6 +77,12 @@ def main():
             if fp or fn:
                 row["errors"].append({"kind": kind, "missing": list(map(str, (gold - pred).elements())),
                                       "extra": list(map(str, (pred - gold).elements()))})
+        if "complaint" in c:
+            cc = (rec["chief_complaint"] or "").lower()
+            ok = any(k in cc for k in c["complaint"])
+            complaint_hits.append(ok)
+            if not ok:
+                row["errors"].append({"kind": "complaint", "expected": c["complaint"], "got": rec["chief_complaint"]})
         details.append(row)
         flag = "ok " if not row["errors"] else "ERR"
         print(f"[{flag}] {c['id']:7s} {latencies[-1]:5.1f}s", *(f"\n        {e}" for e in row["errors"]))
@@ -89,6 +96,9 @@ def main():
             summary.setdefault(scope, {})[kind] = {"precision": round(p, 3), "recall": round(r, 3), "f1": round(f, 3)}
             line.append(f"{kind} P={p:.2f} R={r:.2f} F1={f:.2f}")
         print(f"{scope:9s} | " + " | ".join(line))
+    if complaint_hits:
+        summary["complaint_accuracy"] = round(sum(complaint_hits) / len(complaint_hits), 3)
+        print(f"complaint | {sum(complaint_hits)}/{len(complaint_hits)} chief complaints name the right body part")
     summary["latency_s"] = {"median": round(statistics.median(latencies), 2), "max": round(max(latencies), 2)}
     print(f"latency   | median {summary['latency_s']['median']}s, max {summary['latency_s']['max']}s")
     Path(args.out).write_text(json.dumps({"summary": summary, "details": details}, indent=2, ensure_ascii=False), encoding="utf-8")

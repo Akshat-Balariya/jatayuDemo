@@ -74,7 +74,7 @@ UNITS: dict[str, list[str]] = {
 
 # canonical procedure -> (local code, synonyms)
 PROCEDURES: dict[str, tuple[str, list[str]]] = {
-    "IV cannulation": ("PROC-IV", ["iv access", "iv line", "iv cannula", "cannulation", "gauge", "16g", "18g", "20g", "22g", "24g", "iv started", "started iv", "venous access", "peripheral iv", "drip lagaya", "cannula lagaya", "कैनुला"]),
+    "IV cannulation": ("PROC-IV", ["iv access", "iv line", "iv cannula", "cannulation", "gauge", "gage", "16g", "18g", "20g", "22g", "24g", "iv started", "started iv", "venous access", "peripheral iv", "drip lagaya", "cannula lagaya", "कैनुला"]),
     "IO access": ("PROC-IO", ["io access", "intraosseous access", "io needle"]),
     "CPR": ("PROC-CPR", ["cpr", "chest compressions", "compressions", "cardiopulmonary resuscitation", "सीपीआर"]),
     "Defibrillation": ("PROC-DEFIB", ["defibrillation", "defib", "shock", "shocked", "aed", "aed shock", "jhatka", "झटका"]),
@@ -89,7 +89,7 @@ PROCEDURES: dict[str, tuple[str, list[str]]] = {
     "Wound dressing": ("PROC-DRESS", ["dressing", "bandage", "bandaged", "pressure dressing", "patti", "पट्टी"]),
     "12-lead ECG": ("PROC-ECG12", ["12 lead", "12-lead", "ecg", "ekg", "twelve lead"]),
     "Cardiac monitoring": ("PROC-MON", ["cardiac monitor", "monitor attached", "leads attached"]),
-    "Glucose check": ("PROC-BGL", ["glucose check", "sugar check", "glucometer", "bgl", "cbg", "rbs", "sugar test"]),
+    "Glucose check": ("PROC-BGL", ["glucose check", "sugar check", "glucometer", "bgl", "cbg", "rbs", "sugar test", "blood glucose", "blood sugar", "sugar", "शुगर"]),
     "Vagal maneuver": ("PROC-VAGAL", ["vagal maneuver", "vagal manoeuvre", "valsalva", "vagal"]),
     "Spinal immobilization": ("PROC-SPINE", ["spine board", "spinal board", "backboard", "immobilization", "immobilisation"]),
     "Needle decompression": ("PROC-NDC", ["needle decompression", "needle thoracostomy"]),
@@ -98,3 +98,59 @@ PROCEDURES: dict[str, tuple[str, list[str]]] = {
 
 # Convert between mass units to compare against max dose.
 MASS_TO_MG = {"mcg": 0.001, "mg": 1.0, "g": 1000.0}
+
+# Hindi / Hinglish clinical words -> English. Terms found in a note are passed to the LLM as a glossary
+# so it translates the complaint literally instead of guessing (e.g. "ghutno ka dard" is knee pain).
+HINDI_GLOSSARY: dict[str, list[str]] = {
+    # body parts
+    "knee": ["ghutna", "ghutne", "ghutno", "ghutnon", "घुटना", "घुटने", "घुटनों"],
+    "abdomen / stomach": ["pet", "पेट"],
+    "chest": ["seena", "seene", "sina", "chhati", "chati", "सीना", "सीने", "छाती"],
+    "head": ["sir", "sar", "सिर", "सर"],
+    "lower back / waist": ["kamar", "कमर"],
+    "back": ["peeth", "पीठ"],
+    "leg / foot": ["pair", "pairon", "paon", "paer", "taang", "tang", "पैर", "पैरों", "टांग"],
+    "hand / arm": ["haath", "hath", "हाथ"],
+    "arm": ["baazu", "bazu", "बाजू"],
+    "shoulder": ["kandha", "kandhe", "कंधा", "कंधे"],
+    "neck": ["gardan", "गर्दन"],
+    "throat": ["gala", "gale", "गला", "गले"],
+    "eye": ["aankh", "ankh", "aankhon", "आंख", "आँख"],
+    "ear": ["kaan", "कान"],
+    "tooth": ["daant", "dant", "दांत"],
+    "jaw": ["jabda", "jabde", "जबड़ा"],
+    "ribs": ["pasli", "pasliyan", "पसली"],
+    "wrist": ["kalai", "कलाई"],
+    "ankle": ["takhna", "takhne", "टखना", "टखने"],
+    "elbow": ["kohni", "कोहनी"],
+    "finger": ["ungli", "ungliyon", "उंगली"],
+    "thigh": ["jangh", "jaangh", "जांघ"],
+    "hip": ["kulha", "koolha", "कूल्हा"],
+    "bone": ["haddi", "हड्डी"],
+    # symptoms / events
+    "pain": ["dard", "दर्द"],
+    "swelling": ["sujan", "soojan", "सूजन"],
+    "fever": ["bukhar", "बुखार"],
+    "vomiting": ["ulti", "ultiyan", "उल्टी"],
+    "diarrhoea": ["dast", "दस्त"],
+    "dizziness": ["chakkar", "चक्कर"],
+    "unconscious": ["behosh", "बेहोश"],
+    "breathlessness": ["saans phool", "saans lene mein takleef", "सांस फूल"],
+    "cough": ["khansi", "खांसी"],
+    "burning sensation": ["jalan", "जलन"],
+    "burn injury": ["jal gaya", "jal gayi", "जल गया", "जल गई"],
+    "blood / bleeding": ["khoon", "खून"],
+    "seizure / fit": ["daura", "दौरा"],
+    "epilepsy": ["mirgi", "मिर्गी"],
+    "weakness": ["kamzori", "कमज़ोरी", "कमजोरी"],
+    "paralysis / stroke": ["lakwa", "laqwa", "लकवा"],
+    "injury": ["chot", "चोट"],
+    "fracture": ["toot", "tooti", "toota", "टूट", "टूटी"],
+    "stairs": ["seedhi", "sidhi", "seedhiyon", "सीढ़ी", "सीढ़ियों"],
+    "fell / fall": ["gir gaye", "gir gaya", "gir gayi", "गिर गए", "गिर गया", "गिर गई"],
+    "bite": ["kaata", "kata", "काटा"],
+    "snake": ["saanp", "sanp", "सांप"],
+    "scorpion": ["bichhu", "बिच्छू"],
+    "poison": ["zeher", "zehar", "ज़हर", "जहर"],
+    "palpitations / anxiety": ["ghabrahat", "घबराहट"],
+}

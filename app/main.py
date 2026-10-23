@@ -15,19 +15,36 @@ from .schemas import ExtractRequest, SaveRequest, to_fhir_lite
 app = FastAPI(title="Field-to-Record")
 
 
+@app.middleware("http")
+async def no_cache(request, call_next):
+    """Always serve the current UI files (avoids a stale app.js after an update)."""
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.on_event("startup")
 def warm_up():
-    """Load Whisper and the LLM in the background so the first real request is fast."""
-    def _run():
-        try:
-            asr.get_model()
-        except Exception as e:
-            print(f"[warm-up] ASR not loaded: {e}")
+    """Check the local LLM (starting Ollama if needed) and load both models in the background."""
+    def _llm():
+        h = extractor.ensure_running(log=lambda m: print(m, flush=True))
+        if not h["installed"]:
+            return
         try:
             extractor.extract("Aspirin 300 mg PO.")
+            print(f"[llm] {config.LLM_MODEL} ready", flush=True)
         except Exception as e:
-            print(f"[warm-up] LLM not loaded: {e}")
-    threading.Thread(target=_run, daemon=True).start()
+            print(f"[llm] warm-up failed: {e}", flush=True)
+
+    def _asr():
+        try:
+            asr.get_model()
+            print(f"[asr] {asr.health()} ready", flush=True)
+        except Exception as e:
+            print(f"[asr] not loaded: {e}", flush=True)
+
+    threading.Thread(target=_llm, daemon=True).start()
+    threading.Thread(target=_asr, daemon=True).start()
 
 
 @app.get("/api/health")

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Field-to-Record</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 <header>
@@ -24,7 +24,10 @@
 
 <main>
   <section class="card" id="capture">
-    <h2><span class="step">1</span> Capture</h2>
+    <h2><span class="step">1</span> Capture
+      <span class="spacer"></span>
+      <button id="new-entry" class="ghost" title="Clear everything and start a new patient record">+ New entry</button>
+    </h2>
     <div class="grid3">
       <label>Incident ID<input id="incident"></label>
       <label>Responder ID<input id="responder" value="EMT-042"></label>
@@ -42,8 +45,12 @@
         <span class="dot"></span><span id="rec-label">Record</span>
       </button>
       <span id="rec-timer" class="muted">00:00</span>
-      <span id="asr-info" class="muted"></span>
+      <span class="spacer"></span>
+      <label class="inline" title="Times not stated in the note, and relative times like '5 min ago', are taken from this">
+        Note time <input type="time" id="note-time">
+      </label>
     </div>
+    <div id="asr-info" class="muted small"></div>
     <label class="full">Transcript / typed note
       <textarea id="note" rows="6" placeholder="Dictate, or type e.g. &quot;5 minute pehle adrenaline 0.5 mg IM right thigh mein diya, IV 18G left hand, NS start kiya, BP 90/60&quot;"></textarea>
     </label>
@@ -65,6 +72,7 @@
         <label>Weight (kg)<input id="p-wt" type="number" step="0.1"></label>
         <label>Chief complaint<input id="p-cc"></label>
       </div>
+      <div id="cc-meta" class="evidence"></div>
 
       <h3>Medications administered <button class="link" data-add="medications">+ add</button></h3>
       <div class="table-wrap"><table id="t-meds">
@@ -106,6 +114,6 @@
   </section>
 </main>
 <footer class="muted small">Documentation aid only — not clinical decision support. Synthetic data only; no real PHI.</footer>
-<script src="app.js"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

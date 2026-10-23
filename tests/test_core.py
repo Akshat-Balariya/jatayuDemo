@@ -112,3 +112,50 @@ def test_audit_detects_deleted_row(fresh_db):
     with sqlite3.connect(config.DB_PATH) as c:
         c.execute("DELETE FROM records WHERE seq = 2")
     assert not audit.verify()["ok"]
+
+
+def test_glossary_hints():
+    from app.extractor import glossary_hints
+    assert "ghutno = knee" in glossary_hints("Patient ko ghutno ka dard hai")
+    assert "पेट = abdomen / stomach" in glossary_hints("पेट में दर्द")
+    assert glossary_hints("Aspirin 300 mg given") == []
+
+
+def test_relative_time_uses_recording_time():
+    rec_time = datetime.fromisoformat("2026-10-23T09:00:00+05:30")
+    ext = LLMExtraction.model_validate({"medications": [
+        {"drug": "aspirin", "dose_value": 300, "dose_unit": "mg", "route": "PO", "time": "10 min ago", "evidence": "aspirin 300 mg"},
+        {"drug": "ondansetron", "dose_value": 4, "dose_unit": "mg", "route": "IV", "evidence": "ondansetron 4 mg"},
+    ]})
+    rec = normalize(ext, "aspirin 300 mg 10 min ago, ondansetron 4 mg", rec_time)
+    assert rec.medications[0].time == "2026-10-23T08:50:00+05:30"
+    assert rec.medications[1].time == "2026-10-23T09:00:00+05:30"
+    assert "recording time" in rec.medications[1].warnings[0]
+
+
+def test_ungrounded_complaint_is_flagged():
+    ext = LLMExtraction.model_validate({"chief_complaint": "chest pain", "chief_complaint_evidence": "seene mein dard"})
+    assert normalize(ext, "ghutno ka dard", REF).chief_complaint_warnings
+    ext = LLMExtraction.model_validate({"chief_complaint": "knee pain", "chief_complaint_evidence": "ghutno ka dard"})
+    assert not normalize(ext, "ghutno ka dard", REF).chief_complaint_warnings
+
+
+# Exact failure seen in testing: the model dropped "dolo" from its quote and called it ondansetron.
+SPOKEN = ("50 sasal ke aadmi kumar mein bhoat daad cd se gir gaye. 10 minute pelle dolo 650 mg muhse diya. "
+          "Right hand mein piece gage cannula lagaya aur ondansetron 4 mg IV diya. BP 130 x 85, Pulse 102.")
+
+
+def test_drug_trimmed_from_quote_is_recovered_from_sentence():
+    ext = LLMExtraction.model_validate({"medications": [
+        {"drug": "ondansetron", "dose_value": 650, "dose_unit": "mg", "route": "PO",
+         "time": "10 minute pelle", "evidence": "10 minute pelle 650 mg muhse diya"},
+        {"drug": "ondansetron", "dose_value": 4, "dose_unit": "mg", "route": "IV",
+         "evidence": "Right hand mein piece gage cannula lagaya aur ondansetron 4 mg IV diya"},
+    ]})
+    rec = normalize(ext, SPOKEN, REF)
+    para, ond = rec.medications
+    assert para.drug == "acetaminophen" and para.dose_value == 650
+    assert para.time == "2026-10-23T14:30:00+05:30"           # "10 minute pelle" before recording time
+    assert not any("exceeds" in w for w in para.warnings)
+    assert ond.drug == "ondansetron"
+    assert any(p.name == "IV cannulation" for p in rec.procedures)  # "piece gage" ~ gauge

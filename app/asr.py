@@ -14,8 +14,9 @@ from . import config
 # Bias Whisper towards romanised Hinglish + medical vocabulary instead of translating or
 # forcing everything into Devanagari.
 HINGLISH_PROMPT = (
-    "Patient ko adrenaline 0.5 mg IM diya. Aspirin 300 mg chewed. IV cannula lagaya, NS start kiya. "
-    "BP 120/80, SpO2 96 percent, GCS 15. Nitroglycerin sublingual, ondansetron 4 mg IV."
+    "Pachaas saal ke aadmi, kamar mein bahut dard, seedhi se gir gaye. Ghutno mein sujan. "
+    "Das minute pehle Dolo 650 mg muh se diya. Bees gauge cannula lagaya, NS start kiya. "
+    "Adrenaline 0.5 mg IM, Ondem 4 mg IV, Avil, Asthalin neb. BP 120/80, SpO2 96 percent, pulse 102."
 )
 ENGLISH_PROMPT = (
     "Epinephrine 0.3 mg IM, aspirin 324 mg PO, nitroglycerin 0.4 mg SL, naloxone 2 mg intranasal, "
