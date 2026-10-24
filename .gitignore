@@ -4,3 +4,4 @@ __pycache__/
 data/
 eval/results*.json
 .pytest_cache/
+.idea/
