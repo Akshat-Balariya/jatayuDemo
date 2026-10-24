@@ -463,7 +463,19 @@ let hist = null, selected = null;
 const fmtTime = (iso) => new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 function diffTable(changes, edits = []) {  // rows from the server's describe_edits: {label, before, after, change}
   // a server older than this page sends only raw edits: show them plainly rather than failing
-  changes ??= edits.map((e) => ({ label: e.field, before: String(e.machine ?? "—"), after: String(e.human ?? "—"), change: "changed" }));
+  const show = (v) => {
+    if (v == null || v === "") return "—";
+    if (typeof v === "object") {  // a whole item added or removed
+      if (v.drug) return `${v.drug}${v.dose_value != null ? ` ${v.dose_value} ${v.dose_unit || ""}` : ""} ${v.route || ""}`.trim();
+      return v.name || `${v.type || ""} ${v.value || ""} ${v.unit || ""}`.trim() || JSON.stringify(v);
+    }
+    return typeof v === "string" && /T\d\d:\d\d/.test(v) ? hm(v) : String(v);
+  };
+  const hidden = /\.(drug_raw|name_raw|time_raw|evidence|evidence_found|warnings|rxnorm|code)$|^(reference_time|chief_complaint_warnings)$/;
+  changes ??= edits.filter((e) => !hidden.test(e.field)).map((e) => ({
+    label: e.field, before: show(e.machine), after: show(e.human),
+    change: e.machine == null && typeof e.human === "object" ? "added" : e.human == null && typeof e.machine === "object" ? "removed" : "changed",
+  }));
   if (!changes.length) return `<p class="muted">No clinical changes.</p>`;
   return `<table><tbody>${changes.map((c) => `<tr><td>${esc(c.label)}${c.change !== "changed" ? ` <span class="muted">(${c.change})</span>` : ""}</td>
     <td><span class="diff-old">${esc(c.before)}</span> → <span class="diff-new">${esc(c.after)}</span></td></tr>`).join("")}</tbody></table>`;

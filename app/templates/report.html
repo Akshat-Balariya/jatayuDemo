@@ -17,6 +17,7 @@
   .version { margin-top: 10px; padding: 8px 12px; border-radius: 6px; background: #eef4ff; }
   .version.stale { background: #fff1f0; }
   .hash { font-family: Consolas, monospace; font-size: 11px; word-break: break-all; }
+  .part-label { margin: 10px 0 4px; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: .04em; }
   .transcript { white-space: pre-wrap; background: #f6f6f6; padding: 10px; border-radius: 6px; }
   .print { float: right; }
   @media print { .print { display: none; } body { margin: 0; } }
@@ -81,7 +82,11 @@
 {% else %}<p class="muted">None recorded.</p>{% endif %}
 
 <h2>Source dictation</h2>
-<div class="transcript">{{ rec.transcript }}</div>
+{% if dictation is not defined %}{% set dictation = [{"label": "", "text": rec.transcript}] %}{% endif %}
+{% for part in dictation %}
+{% if dictation | length > 1 %}<div class="part-label">{{ part.label }}</div>{% endif %}
+<div class="transcript">{{ part.text }}</div>
+{% endfor %}
 
 <h2>Audit</h2>
 <table>
@@ -91,7 +96,9 @@
   {% if rec.parent %}<tr><th>Parent version</th><td class="hash">{{ rec.parent_label }} &middot; {{ rec.parent_hash }}</td></tr>{% endif %}
   <tr><th>Transcript SHA-256</th><td class="hash">{{ rec.transcript_sha256 }}</td></tr>
   <tr><th>Audio SHA-256</th><td class="hash">{{ rec.audio_sha256 or "typed note (no audio)" }}</td></tr>
-  <tr><th>Models</th><td class="hash">{{ rec.model_info | tojson }}</td></tr>
+  {% if models is not defined %}{% set models = [("Models", rec.model_info | tojson)] %}{% endif %}
+  {% for label, value in models %}<tr><th>{{ label }}</th><td>{{ value }}</td></tr>{% endfor %}
+  {% if changes is not defined %}{% set ns = namespace(rows=[]) %}{% for e in rec.edits or [] %}{% set ns.rows = ns.rows + [{"label": e.field, "before": e.machine, "after": e.human, "change": "changed"}] %}{% endfor %}{% set changes = ns.rows %}{% endif %}
   <tr><th>{{ 'Changes' if rec.kind == 'amend' else 'Human edits' }}</th><td>{{ changes | length }} change(s) from {{ 'version ' ~ rec.parent_label if rec.kind == 'amend' else 'the machine draft' }}{% if changes %} (rows highlighted above){% endif %}</td></tr>
 </table>
 {% if changes %}

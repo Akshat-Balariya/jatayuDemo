@@ -165,3 +165,15 @@ def test_decimal_point_does_not_split_sentences():
     from app.normalize import split_sentences
     assert split_sentences("Adrenaline 0.5 mg IM diya. NS 500 ml start kiya") == [
         "Adrenaline 0.5 mg IM diya", " NS 500 ml start kiya"]
+
+
+def test_report_splits_addenda_and_tabulates_models():
+    from app.report import dictation_parts, model_rows
+    parts = dictation_parts("aspirin 300 mg\n\n[Addendum 14:47] Ondem 4 mg IV diya")
+    assert [p["label"] for p in parts] == ["Original dictation", "Addendum 1 · 14:47"]
+    assert parts[1]["text"] == "Ondem 4 mg IV diya"
+    rows = dict(model_rows({"asr_model": "large-v3-turbo", "asr_device": "cuda", "llm_model": "qwen2.5:7b",
+                            "llm_latency_s": 7.5, "harness": {"mode": "llm", "checks": {"Negation": "pass", "Dose grounding": "flag"}}}))
+    assert rows["Speech-to-text"] == "large-v3-turbo on cuda"
+    assert rows["Language model"] == "qwen2.5:7b · 7.5 s"
+    assert rows["Harness checks"] == "1 passed, 0 fixed, 1 flagged (Dose grounding)"
