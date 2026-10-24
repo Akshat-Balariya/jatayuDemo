@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Field-to-Record</title>
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <header>
   <div class="brand">
-    <div class="logo">F→R</div>
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
     <div>
       <h1>Field-to-Record</h1>
       <div class="sub">Voice → structured, signed medication &amp; procedure record · runs fully offline</div>
@@ -26,7 +26,7 @@
   <section class="card" id="capture">
     <h2><span class="step">1</span> Capture
       <span class="spacer"></span>
-      <button id="new-entry" class="ghost" title="Clear everything and start a new patient record">+ New entry</button>
+      <button id="new-entry" class="ghost" title="Clear everything and start a new patient record">New Entry</button>
     </h2>
     <div class="grid3">
       <label>Incident ID<input id="incident"></label>
@@ -57,13 +57,13 @@
     <div class="row">
       <select id="samples"><option value="">Load a sample note…</option></select>
       <span class="spacer"></span>
-      <button id="extract" class="primary">Extract record →</button>
+      <button id="extract" class="primary">Extract Record</button>
     </div>
     <div id="extract-info" class="muted small"></div>
   </section>
 
   <section class="card" id="review">
-    <h2><span class="step">2</span> Review &amp; edit <span class="muted small" id="warn-count"></span></h2>
+    <h2><span class="step">2</span> Review <span class="muted small" id="warn-count"></span></h2>
     <div id="review-empty" class="empty">Extracted medications, procedures and vitals will appear here for the responder to check.</div>
     <div id="review-body" hidden>
       <div class="grid4">
@@ -95,7 +95,7 @@
       <div class="row sign-row">
         <label class="check"><input type="checkbox" id="confirm"> I confirm this record reflects care I provided.</label>
         <span class="spacer"></span>
-        <button id="sign" class="primary" disabled>Confirm &amp; sign</button>
+        <button id="sign" class="primary" disabled>Confirm &amp; Sign</button>
       </div>
       <div id="signed" class="signed" hidden></div>
     </div>
@@ -104,7 +104,7 @@
   <section class="card wide" id="history">
     <h2><span class="step">3</span> Audit chain
       <span class="spacer"></span>
-      <button id="verify" class="ghost">Verify chain</button>
+      <button id="verify" class="ghost">Verify Chain</button>
     </h2>
     <div id="verify-result" class="small"></div>
     <div class="table-wrap"><table id="t-history">
@@ -114,6 +114,6 @@
   </section>
 </main>
 <footer class="muted small">Documentation aid only — not clinical decision support. Synthetic data only; no real PHI.</footer>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
