@@ -51,7 +51,7 @@ ROUTES: dict[str, list[str]] = {
     "IO": ["io", "intraosseous"],
     "SC": ["sc", "subcut", "subcutaneous", "sq", "चमड़ी के नीचे"],
     "SL": ["sl", "sublingual", "under the tongue", "jeebh ke neeche", "जीभ के नीचे"],
-    "PO": ["po", "oral", "orally", "by mouth", "chewed", "chew", "muh se", "मुंह से", "chabaya", "chaba ke"],
+    "PO": ["po", "oral", "orally", "by mouth", "chewed", "chew", "muh se", "muhse", "munh se", "mooh se", "मुंह से", "chabaya", "chaba ke"],
     "IN": ["in", "intranasal", "nasal", "naak se", "नाक से"],
     "INH": ["inh", "inhaled", "nebulized", "nebulised", "neb", "nebulizer", "nebulisation", "inhaler", "mdi", "nebulization"],
     "ET": ["et", "endotracheal"],
@@ -153,4 +153,23 @@ HINDI_GLOSSARY: dict[str, list[str]] = {
     "scorpion": ["bichhu", "बिच्छू"],
     "poison": ["zeher", "zehar", "ज़हर", "जहर"],
     "palpitations / anxiety": ["ghabrahat", "घबराहट"],
+}
+
+# Routes a drug is normally given by in pre-hospital care. A route outside this set is flagged for
+# review (not blocked). Demo-grade: verify against local protocols before any real use.
+ALLOWED_ROUTES: dict[str, set[str]] = {
+    "aspirin": {"PO"}, "clopidogrel": {"PO"},
+    "nitroglycerin": {"SL", "IV", "TOP"}, "isosorbide dinitrate": {"SL", "PO"},
+    "epinephrine": {"IM", "IV", "IO", "ET", "INH", "SC"}, "naloxone": {"IN", "IV", "IM", "IO", "SC"},
+    "albuterol": {"INH"}, "ipratropium": {"INH"}, "oxygen": {"INH"},
+    "glucose": {"IV", "IO", "PO"}, "amiodarone": {"IV", "IO"}, "adenosine": {"IV", "IO"},
+    "atropine": {"IV", "IO", "IM", "ET"}, "midazolam": {"IM", "IV", "IN", "IO", "PO"},
+    "diazepam": {"IV", "PR", "IM", "PO"}, "lorazepam": {"IV", "IM", "PO"},
+    "ondansetron": {"IV", "IM", "PO"}, "metoclopramide": {"IV", "IM", "PO"},
+    "morphine": {"IV", "IM", "IO", "SC", "PO"}, "fentanyl": {"IV", "IN", "IM", "IO"},
+    "ketamine": {"IV", "IM", "IN", "IO"}, "sodium chloride 0.9%": {"IV", "IO"}, "ringer lactate": {"IV", "IO"},
+    "tranexamic acid": {"IV", "PO"}, "acetaminophen": {"PO", "IV", "PR"}, "ibuprofen": {"PO", "IV"},
+    "hydrocortisone": {"IV", "IM"}, "dexamethasone": {"IV", "IM", "PO"}, "methylprednisolone": {"IV", "IM"},
+    "furosemide": {"IV", "IM", "PO"}, "pheniramine": {"IV", "IM", "PO"}, "diphenhydramine": {"IV", "IM", "PO"},
+    "magnesium sulfate": {"IV", "IO", "IM"}, "heparin": {"IV", "SC"},
 }

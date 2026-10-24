@@ -159,3 +159,9 @@ def test_drug_trimmed_from_quote_is_recovered_from_sentence():
     assert not any("exceeds" in w for w in para.warnings)
     assert ond.drug == "ondansetron"
     assert any(p.name == "IV cannulation" for p in rec.procedures)  # "piece gage" ~ gauge
+
+
+def test_decimal_point_does_not_split_sentences():
+    from app.normalize import split_sentences
+    assert split_sentences("Adrenaline 0.5 mg IM diya. NS 500 ml start kiya") == [
+        "Adrenaline 0.5 mg IM diya", " NS 500 ml start kiya"]

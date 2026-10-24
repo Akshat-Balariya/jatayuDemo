@@ -135,26 +135,42 @@ class LLMUnavailable(RuntimeError):
     pass
 
 
-def _user_turn(text: str) -> dict:
+class LLMOutputError(ValueError):
+    """The model answered, but not with a valid extraction."""
+
+    def __init__(self, message: str, content: str):
+        super().__init__(message)
+        self.content = content
+
+
+def _user_turn(text: str, extra: list[str] | None = None) -> dict:
     hints = glossary_hints(text)
     glossary = f"\n\nGlossary for Hindi words in this note: {'; '.join(hints)}" if hints else ""
-    return {"role": "user", "content": f"Note:\n{text}{glossary}"}
+    notes = "".join(f"\n{e}" for e in extra or [])
+    return {"role": "user", "content": f"Note:\n{text}{glossary}{notes}"}
 
 
-def _messages(text: str) -> list[dict]:
+def _messages(text: str, hints: list[str] | None = None, repair: tuple[str, str] | None = None) -> list[dict]:
     msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
     for note, out in FEW_SHOT:
         msgs.append(_user_turn(note))
         msgs.append({"role": "assistant", "content": json.dumps(out, ensure_ascii=False)})
-    msgs.append(_user_turn(text))
+    msgs.append(_user_turn(text, hints))
+    if repair:  # show the model its invalid answer and the validation error, once
+        bad, err = repair
+        msgs.append({"role": "assistant", "content": bad[:4000]})
+        msgs.append({"role": "user", "content": f"That output was invalid: {err[:600]}\n"
+                                                "Return the corrected JSON only, following the schema exactly."})
     return msgs
 
 
-def extract(text: str, model: str | None = None) -> tuple[LLMExtraction, dict]:
+def extract(text: str, model: str | None = None, hints: list[str] | None = None,
+            repair: tuple[str, str] | None = None) -> tuple[LLMExtraction, dict]:
+    """One model call. `hints` are extra lines appended to the note; `repair` = (bad output, error)."""
     model = model or config.LLM_MODEL
     payload = {
         "model": model,
-        "messages": _messages(text),
+        "messages": _messages(text, hints, repair),
         "format": _SCHEMA,
         "stream": False,
         "keep_alive": -1,  # stay resident while the app runs (fits in 8 GB VRAM alongside Whisper)
@@ -167,7 +183,10 @@ def extract(text: str, model: str | None = None) -> tuple[LLMExtraction, dict]:
     except httpx.HTTPError as e:
         raise LLMUnavailable(f"Local LLM not reachable at {config.OLLAMA_URL} ({e}). Is Ollama running with model '{model}'?") from e
     content = r.json()["message"]["content"]
-    ext = LLMExtraction.model_validate_json(content)
+    try:
+        ext = LLMExtraction.model_validate_json(content)
+    except ValueError as e:  # pydantic ValidationError and JSON decode errors
+        raise LLMOutputError(str(e), content) from e
     return ext, {"llm_model": model, "llm_latency_s": round(time.perf_counter() - t0, 2)}
 
 

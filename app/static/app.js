@@ -122,16 +122,32 @@ $("#extract").onclick = async () => {
     const r = await api("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, reference_time: noteTime }) });
     draft = r.record; rec = clone(r.record);
     modelInfo = { ...r.model_info, ...(asrMeta ? { asr_model: asrMeta.asr_model, asr_device: asrMeta.asr_device } : {}) };
-    $("#extract-info").textContent = `${r.model_info.llm_model} · ${r.model_info.llm_latency_s}s`;
+    renderHarness(r.model_info, r.harness);
     $("#signed").hidden = true;
     renderReview();
   } catch (e) { $("#extract-info").textContent = "⚠ " + e.message; }
   btn.disabled = false; btn.textContent = "Extract Record";
 };
 
+function renderHarness(info, h) {
+  const mode = {
+    "llm": "",
+    "llm-retry": `<span class="chip">model output repaired on retry</span>`,
+    "rules-fallback": `<span class="chip bad">LLM unavailable: rule-based draft, review every field</span>`,
+  }[h.mode];
+  const icon = { pass: "✓", fixed: "↻", flag: "!" };
+  $("#extract-info").innerHTML = `
+    <div>${esc(info.llm_model)}${info.llm_latency_s ? ` · ${info.llm_latency_s}s` : ""} ${mode}</div>
+    <details class="harness"><summary>Harness · ${h.checks.length} checks · ${h.fixed} fixed · ${h.flagged} flagged</summary>
+      <ul>${h.checks.map((c) => `<li class="${c.status}"><b>${icon[c.status]} ${esc(c.name)}</b> — ${esc(c.detail)}</li>`).join("")}</ul>
+      ${h.hints.length ? `<div class="muted">Told the model: ${h.hints.map(esc).join(" · ")}</div>` : ""}
+    </details>`;
+}
+
 // ---------- review ----------
 function chips(item) {
-  return (item.warnings || []).map((w) => `<span class="chip ${/hallucination|exceeds/.test(w) ? "bad" : ""}">${esc(w)}</span>`).join("");
+  const serious = /hallucination|exceeds|NOT given|missed by the model|not stated in the note|history or allergy/;
+  return (item.warnings || []).map((w) => `<span class="chip ${serious.test(w) ? "bad" : ""}">${esc(w)}</span>`).join("");
 }
 function metaRow(item, cols, extra = "") {
   const ev = item.evidence ? `“${esc(item.evidence)}”` : "";

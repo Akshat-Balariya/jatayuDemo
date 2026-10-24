@@ -36,9 +36,10 @@
 | F19 | Model warm-up on startup | `app/main.py` | Built |
 | F20 | Configuration via environment variables | `app/config.py` | Built |
 | F21 | Evaluation harness | `eval/run_eval.py` | Built |
-| F22 | Unit tests | `tests/test_core.py`, `tests/test_history.py` | Built |
+| F22 | Unit tests | `tests/test_core.py`, `tests/test_history.py`, `tests/test_harness.py` | Built |
 | F23 | Hash-linked version graph: amendments, branches, signed "make current" switches | `app/audit.py`, `app/main.py` | Built |
 | F24 | Record history view (version graph, diffs, compare, switch) | `app/static/` | Built |
+| F25 | LLM harness: transcript drug scan + hints, retry/repair, rule-based fallback, post-extraction checks | `app/harness.py` | Built |
 
 ---
 
@@ -262,6 +263,24 @@ draft record
 
 ---
 
+### F25 — LLM harness (`app/harness.py`)
+The LLM is never trusted alone; every extraction goes through `harness.extract_record`.
+- **Before the call:** `scan_drugs` finds every medicine the note names (exact lexicon match, longest synonym first, plus a fuzzy match for speech-recognition misspellings such as "paracitamol"), and classifies each mention by its clause as *given*, *negated* ("refused", "nahi diya", "mana kar diya", "नहीं") or *context* (allergy, home medication, considered). `drug_hints` turns this into lines appended to the note for the model, e.g. "ondem = ondansetron", "NOT given: morphine", and, when the note has a sugar reading, "glucose readings are vitals, not medicines".
+- **The call:** output that fails schema validation is sent back once with the validation error (`LLMOutputError` → repair turn). If the model is unreachable or still invalid, `rules_extract` builds the draft deterministically (drugs, dose, unit, route, time, procedures, vitals, age and sex) and the result is labelled `rules-fallback`.
+- **After the call** (on the normalised record), each check adds item warnings and a check result `pass` / `fixed` / `flag`:
+  - *Output schema*: first-time valid, repaired on retry, or rule-based draft.
+  - *Medicine names*: every medicine is a known generic and named (or plainly misspelt) in the note.
+  - *Phantom items*: an item whose quote names no medicine and no dose is removed if that drug is already recorded from a real quote, else flagged.
+  - *Medicine recall*: every medicine named as given (with a dose or an administration word, so "blood glucose 42" doesn't count) is in the record; a missing one is added from the transcript and flagged.
+  - *Negation*: a listed medicine the note says was not given, or only mentions as history or allergy, is flagged.
+  - *Dose grounding*: the dose number appears in its source sentence (mg/mcg conversions allowed).
+  - *Route plausibility*: the route is in `ALLOWED_ROUTES` for that drug.
+  - *Time sanity*: not after the recording, not more than 12 h before it.
+  - *Duplicates*: identical items from the same words are removed unless the note says the dose was repeated.
+- The report (mode, checks, hints) is returned by `/api/extract` and shown under "Extract" in the UI; a summary (mode and each check's status) is stored in the record's `model_info`, so it is covered by the signed hash.
+- Sentence splitting ignores decimal points ("0.5 mg"), shared with the normaliser.
+- Eval: `python -m eval.run_eval` runs the harnessed pipeline; `--rules-only` scores the fallback alone. Current: harnessed drug F1 1.00, full_med F1 1.00, procedure F1 0.97, complaints 4/4; rule-based fallback alone drug F1 0.94, full_med F1 0.84, procedure F1 0.99.
+
 ---
 
 ## 4. API reference
@@ -270,7 +289,7 @@ draft record
 |---|---|---|
 | GET | `/api/health` | LLM / ASR / chain status, device ID |
 | POST | `/api/transcribe` | multipart `audio`, `language` → transcript, segments, audio hash |
-| POST | `/api/extract` | `{text, reference_time?}` → `{record, raw, model_info}` (400 empty, 503 LLM down) |
+| POST | `/api/extract` | `{text, reference_time?}` → `{record, raw, model_info, harness}` (400 empty; LLM down → rule-based draft, `harness.mode = rules-fallback`) |
 | POST | `/api/records` | Sign and append a record → `{id, seq, hash, edits}` |
 | GET | `/api/records` | One summary per record (current version, version and branch counts) |
 | GET | `/api/records/{id}` | A stored version plus its place in the history (404 if missing) |

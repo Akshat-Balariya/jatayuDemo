@@ -217,3 +217,13 @@ footer { text-align: center; padding: 4px 16px 32px; color: var(--faint); }
 .hist-actions input { flex: 1; min-width: 200px; }
 #hist-events td { border-top: 1px solid var(--border); padding: 7px 4px; font-size: 12px; }
 @media (max-width: 900px) { .hist-body { grid-template-columns: 1fr; } }
+
+/* LLM harness summary */
+details.harness { margin-top: 6px; }
+details.harness summary { cursor: pointer; color: var(--muted); }
+details.harness ul { list-style: none; padding: 8px 12px; margin: 6px 0; background: var(--fill); border-radius: 10px; }
+details.harness li { padding: 2px 0; color: var(--muted); }
+details.harness li b { color: var(--text); font-weight: 500; }
+details.harness li.pass b { color: var(--ok); }
+details.harness li.fixed b { color: var(--accent); }
+details.harness li.flag b { color: var(--warn); }

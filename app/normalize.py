@@ -186,14 +186,19 @@ def _is_null(s: str | None) -> bool:
     return s is None or _clean(s) in _NULLS
 
 
-_SENTENCE_RE = re.compile(r"[^.!?।\n]+")
+# A full stop ends a sentence, but not the decimal point in "0.5 mg".
+_SENTENCE_SPLIT_RE = re.compile(r"(?<!\d)\.|\.(?!\d)|[!?।\n]")
+
+
+def split_sentences(text: str) -> list[str]:
+    return [s for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
 
 
 def _sentence_of(evidence: str | None, transcript: str) -> str:
     """The transcript sentence the evidence quote was taken from (best token overlap)."""
     ev = set(re.findall(r"\w+", _clean(evidence or "")))
     best, score = "", 0
-    for sent in _SENTENCE_RE.findall(transcript):
+    for sent in split_sentences(transcript):
         overlap = len(ev & set(re.findall(r"\w+", _clean(sent))))
         if overlap > score:
             best, score = sent, overlap
@@ -218,7 +223,7 @@ def _ground_drug(llm_drug: str, evidence: str | None, transcript: str,
         return fixed, DRUGS[fixed][0], True
     if in_ev:
         warnings.append(f"'{llm_drug}' not named in its sentence - verify")
-    elif canon and not mentions(transcript, _DRUG_IDX) & {canon}:
+    elif canon and exact and not mentions(transcript, _DRUG_IDX) & {canon}:  # fuzzy matches already warn
         warnings.append(f"'{llm_drug}' not named anywhere in the transcript - verify")
     return canon, rxcui, exact
 

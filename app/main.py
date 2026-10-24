@@ -8,8 +8,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import asr, audit, config, extractor, report
-from .normalize import normalize
+from . import asr, audit, config, extractor, harness, report
 from .schemas import AmendRequest, ExtractRequest, SaveRequest, SwitchRequest, to_fhir_lite
 
 app = FastAPI(title="Field-to-Record")
@@ -68,12 +67,8 @@ def extract(req: ExtractRequest):
     if not req.text.strip():
         raise HTTPException(400, "empty note")
     ref = datetime.fromisoformat(req.reference_time).astimezone() if req.reference_time else datetime.now().astimezone()
-    try:
-        raw, info = extractor.extract(req.text)
-    except extractor.LLMUnavailable as e:
-        raise HTTPException(503, str(e))
-    record = normalize(raw, req.text, ref)
-    return {"record": record.model_dump(), "raw": raw.model_dump(), "model_info": info}
+    record, raw, info, checks = harness.extract_record(req.text, ref)
+    return {"record": record.model_dump(), "raw": raw.model_dump(), "model_info": info, "harness": checks}
 
 
 @app.post("/api/records")

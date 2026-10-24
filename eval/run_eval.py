@@ -1,6 +1,8 @@
 """Evaluate extraction (local LLM + normaliser) against hand-labelled synthetic dictations.
 
-Usage:  python -m eval.run_eval [--model qwen2.5:7b] [--lang en|hinglish|hi]
+Usage:  python -m eval.run_eval [--model qwen2.5:7b] [--lang en|hinglish|hi] [--rules-only]
+
+Runs the full harnessed pipeline (app.harness.extract_record), as the app does.
 
 Metrics (micro-averaged, multiset matching so repeated doses count):
   drug       - canonical drug name correct
@@ -18,8 +20,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from app import extractor
-from app.normalize import normalize
+from app import config, harness
 
 HERE = Path(__file__).parent
 
@@ -47,6 +48,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model")
     ap.add_argument("--lang")
+    ap.add_argument("--rules-only", action="store_true", help="skip the LLM: score the rule-based fallback alone")
     ap.add_argument("--out", default=str(HERE / "results.json"))
     args = ap.parse_args()
 
@@ -57,13 +59,15 @@ def main():
     totals = {k: [0, 0, 0] for k in ("drug", "full_med", "procedure")}
     by_lang: dict[str, dict] = {}
     latencies, details, complaint_hits = [], [], []
+    modes = Counter()
     ref = datetime.now().astimezone()
 
     for c in cases:
         t0 = time.perf_counter()
-        raw, _ = extractor.extract(c["text"], model=args.model)
+        rec, _, _, report = harness.extract_record(c["text"], ref, model=args.model, use_llm=not args.rules_only)
+        rec = rec.model_dump()
         latencies.append(time.perf_counter() - t0)
-        rec = normalize(raw, c["text"], ref).model_dump()
+        modes[report["mode"]] += 1
         row = {"id": c["id"], "errors": []}
         for kind, gold, pred in (
             ("drug", Counter(med_key(m, False) for m in c["meds"]), Counter(med_key(m, False) for m in rec["medications"])),
@@ -87,7 +91,8 @@ def main():
         flag = "ok " if not row["errors"] else "ERR"
         print(f"[{flag}] {c['id']:7s} {latencies[-1]:5.1f}s", *(f"\n        {e}" for e in row["errors"]))
 
-    print("\n=== Results (%d notes, model %s) ===" % (len(cases), args.model or extractor.config.LLM_MODEL))
+    engine = "rule-based fallback only" if args.rules_only else f"model {args.model or config.LLM_MODEL}, harnessed"
+    print(f"\n=== Results ({len(cases)} notes, {engine}) ===  modes: {dict(modes)}")
     summary = {}
     for scope, t in [("all", totals)] + sorted(by_lang.items()):
         line = []
