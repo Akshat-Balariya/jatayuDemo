@@ -123,6 +123,7 @@ draft record
 
 ### F6 — Time resolution
 - Every item gets an absolute ISO-8601 time, resolved against the note's capture time (`reference_time`).
+- The note time shown under the recorder decides `reference_time`: by default it is the **current time** (shown live, in grey, and taken at the moment of extraction); starting a recording pins the recording's start time; a time set by hand wins over both and stays until the field is emptied or the note is cleared (Clear / New Entry).
 - Supported forms:
   - Relative: "10 min ago", "5 minute pehle", "2 घंटे पहले", plus minutes and hours.
   - Clock: `14:32`, `2:30 pm`, `14.32`, `1432 hrs`, a bare `1042` (how Whisper writes "ten forty-two"), with "baje", "pe" or "par" after it.
@@ -249,6 +250,8 @@ draft record
 - Every chain entry has a `kind`:
   - `create`: the first version (v1) of a record; its `lineage` (record id) is its own id.
   - `amend`: a new version; `parent` = the version it was made from, `parent_hash` = that version's hash. Requires a non-empty `reason` and at least one changed field. Transcript, audio hash, incident and model info are inherited; `draft` = parent's final, `edits` = field diff parent → new.
+  - **Addenda:** while amending, a dictated or typed follow-up note can be extracted with "Extract & Add"; its items are appended to the record being amended (marked "added by addendum"). The amended version's transcript is the original plus `[Addendum HH:MM] <note>`, and each addendum's time, audio hash, transcript hash and models are stored in `model_info.addenda`, all covered by the hash.
+  - **Same-source guard:** an amendment must keep the record's recording time, and every quoted item must appear in the original transcript or an addendum signed with it; a different note is refused (sign it as a new record).
   - `switch`: a signed decision that another version is current; `parent`/`parent_hash` = the version that was current, `target` = the version that becomes current, `edits` = diff between them. Requires a reason.
 - `kind`, `lineage`, `parent`, `parent_hash`, `reason` and `target` are covered by the entry's hash, so each version commits to its parent like a git commit. Amending an older version starts a branch.
 - Current version = the newest version created in the record, unless a later switch names another.

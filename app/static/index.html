@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Field-to-Record</title>
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
 <header>
@@ -56,6 +56,7 @@
     </label>
     <div class="row">
       <select id="samples"><option value="">Load a sample note…</option></select>
+      <button id="clear-note" class="ghost" title="Clear the transcript, its note time and recording link">Clear</button>
       <span class="spacer"></span>
       <button id="extract" class="primary">Extract Record</button>
     </div>
@@ -68,9 +69,10 @@
     <div id="review-body" hidden>
       <div id="amend-bar" class="amend-bar" hidden>
         <div class="row tight">
-          <span>Amending <b id="amend-what"></b> — the signed version stays unchanged; this becomes a new version linked to it by hash.</span>
+          <span>Amending <b id="amend-what"></b> — the signed version stays unchanged; this becomes a new version linked to it by hash.
+            Edit fields below, or dictate / type a follow-up note and press <b>Extract &amp; Add</b> to append its items.</span>
           <span class="spacer"></span>
-          <button id="amend-cancel" class="ghost">Cancel</button>
+          <button id="amend-cancel" class="ghost">Cancel amendment</button>
         </div>
         <label>Reason for amendment<input id="amend-reason" placeholder="e.g. dose corrected after checking the vial"></label>
       </div>
@@ -99,6 +101,12 @@
         <thead><tr><th>Time</th><th>Type</th><th>Value</th><th>Unit</th><th></th></tr></thead>
         <tbody></tbody>
       </table></div>
+
+      <div id="changes" class="changes" hidden>
+        <h3><span>Changes in this review (<span id="change-count">0</span>)</span>
+          <span class="spacer"></span><button class="link" id="undo-last">Undo last</button></h3>
+        <ul id="change-list"></ul>
+      </div>
 
       <div class="row sign-row">
         <label class="check"><input type="checkbox" id="confirm"> I confirm this record reflects care I provided.</label>
@@ -139,6 +147,6 @@
   <div class="table-wrap"><table id="hist-events"><tbody></tbody></table></div>
 </dialog>
 <footer class="muted small">Documentation aid only — not clinical decision support. Synthetic data only; no real PHI.</footer>
-<script src="app.js?v=7"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

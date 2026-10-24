@@ -103,7 +103,8 @@ def get_record(record_id: str):
 def amend(record_id: str, req: AmendRequest):
     """Sign a corrected version made from `record_id`; amending an older version starts a branch."""
     try:
-        rec = audit.amend(record_id, responder_id=req.responder_id, reason=req.reason, final=req.final.model_dump())
+        rec = audit.amend(record_id, responder_id=req.responder_id, reason=req.reason, final=req.final.model_dump(),
+                          addenda=[a.model_dump() for a in req.addenda])
     except audit.HistoryError as e:
         raise HTTPException(400, str(e))
     return {"id": rec["id"], "seq": rec["seq"], "hash": rec["hash"], "parent": rec["parent"],

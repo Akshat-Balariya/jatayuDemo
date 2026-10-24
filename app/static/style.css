@@ -227,3 +227,12 @@ details.harness li b { color: var(--text); font-weight: 500; }
 details.harness li.pass b { color: var(--ok); }
 details.harness li.fixed b { color: var(--accent); }
 details.harness li.flag b { color: var(--warn); }
+
+/* Review change log */
+.changes { margin-top: 20px; background: var(--fill); border-radius: 14px; padding: 4px 14px 10px; }
+.changes h3 { margin-top: 10px; }
+.changes ul { list-style: none; margin: 0; padding: 0; max-height: 180px; overflow-y: auto; }
+.changes li { font-size: 13px; padding: 5px 0; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: baseline; }
+.changes li:first-child { border-top: none; }
+.changes li button { margin-left: auto; flex: none; }
+#note-time.live { color: var(--muted); }

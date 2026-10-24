@@ -152,3 +152,20 @@ def test_changes_are_described_for_people():
     assert {"label": "Medication 1 · dose value", "before": "300", "after": "325", "change": "changed"} in rows
     assert {"label": "Medication 2", "before": "nitroglycerin 0.4 mg SL", "after": "—", "change": "removed"} in rows
     assert not any("evidence" in r["label"] or "rxnorm" in r["label"] for r in rows)
+
+
+def test_addendum_items_are_appended_and_grounded_in_the_addendum():
+    v1 = create()
+    added = json.loads(json.dumps(BASE))
+    added["medications"].append({"drug": "ondansetron", "dose_value": 4, "dose_unit": "mg", "route": "IV",
+                                 "evidence": "Ondem 4 mg IV diya"})
+    addendum = {"transcript": "Ondem 4 mg IV diya", "recorded_at": "2026-10-23T14:55:00+05:30",
+                "audio_sha256": "ab" * 32, "model_info": {"llm_model": "x"}}
+    with pytest.raises(audit.HistoryError):  # without the addendum the new quote is not grounded
+        audit.amend(v1["id"], responder_id="EMT", reason="addendum", final=added)
+    v2 = audit.amend(v1["id"], responder_id="EMT", reason="addendum", final=added, addenda=[addendum])
+    assert v2["transcript"] == "aspirin 300\n\n[Addendum 14:55] Ondem 4 mg IV diya"
+    assert v2["transcript_sha256"] != v1["transcript_sha256"] and v2["audio_sha256"] == v1["audio_sha256"]
+    assert v2["model_info"]["addenda"][0]["audio_sha256"] == "ab" * 32
+    assert [r["change"] for r in audit.describe_edits(v2["edits"])] == ["added"]
+    assert audit.verify()["ok"]

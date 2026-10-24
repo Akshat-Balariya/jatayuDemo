@@ -16,7 +16,8 @@ let draft = null;       // machine output, frozen
 let rec = null;         // record being edited
 let modelInfo = {};
 let asrMeta = null;     // {audio_sha256, language, ...}
-let noteTime = null;    // ISO time the note was recorded/started; unstated & relative times resolve against it
+let noteTime = null;    // pinned note time (ISO): set by hand or by a recording; null = live current time
+let noteTimeSource = null;  // "manual" | "recording" | null (live)
 let amendFrom = null;   // {id, label, incident} while correcting a signed version
 
 // ---------- utils ----------
@@ -39,10 +40,27 @@ function localIso(d) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` +
     `${off >= 0 ? "+" : "-"}${p(Math.trunc(off / 60))}:${p(off % 60)}`;
 }
-function setNoteTime(iso) {
-  noteTime = iso;
+// Unstated and relative times ("10 min pehle") resolve against the note time. By default it is the current
+// time, kept up to date in the field; a recording pins its start time; a time set by hand wins over both.
+function setNoteTime(iso, source) {
+  noteTime = iso; noteTimeSource = source;
   $("#note-time").value = hm(iso);
+  $("#note-time").classList.remove("live");
+  $("#note-time").title = source === "manual" ? "Set by hand: clear the field to go back to the current time"
+    : "Time the recording started: set a time by hand to override it";
 }
+function liveNoteTime() {  // back to following the clock
+  noteTime = null; noteTimeSource = null;
+  tickNoteTime();
+}
+function tickNoteTime() {
+  const f = $("#note-time");
+  if (noteTime || document.activeElement === f) return;
+  f.value = new Date().toTimeString().slice(0, 5);
+  f.classList.add("live");
+  f.title = "Current time (live): set a time by hand to pin it";
+}
+const currentNoteTime = () => noteTime || localIso(new Date());
 function newIncident() {
   const d = new Date(), p = (n) => String(n).padStart(2, "0");
   $("#incident").value = `INC-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
@@ -74,7 +92,8 @@ $("#rec").onclick = async () => {
   catch (e) { alert("Microphone not available: " + e.message); return; }
   chunks = [];
   // the first recording of a note fixes its time; later recordings append to the same note
-  if (!noteTime || !$("#note").value.trim()) setNoteTime(localIso(new Date()));
+  // the first recording of a note pins its time, unless a time was set by hand
+  if (noteTimeSource !== "manual" && (!noteTime || !$("#note").value.trim())) setNoteTime(localIso(new Date()), "recording");
   mediaRec = new MediaRecorder(stream);
   mediaRec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
   mediaRec.onstop = async () => {
@@ -109,25 +128,52 @@ $("#rec").onclick = async () => {
 $("#extract").onclick = async () => {
   const text = $("#note").value.trim();
   if (!text) return;
-  if (amendFrom) {  // a new dictation is a new record, never a version of the one being amended
-    if (!confirm(`You are amending ${amendFrom.incident} ${amendFrom.label}.\n\nExtracting this note will start a NEW record instead, and the amendment will be discarded. Continue?`)) return;
-    endAmend();
-    newIncident();
-  }
   const btn = $("#extract");
   btn.disabled = true; btn.textContent = "Extracting…";
   $("#extract-info").textContent = "";
   try {
-    if (!noteTime) setNoteTime(localIso(new Date()));
-    const r = await api("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, reference_time: noteTime }) });
-    draft = r.record; rec = clone(r.record);
-    modelInfo = { ...r.model_info, ...(asrMeta ? { asr_model: asrMeta.asr_model, asr_device: asrMeta.asr_device } : {}) };
+    const ref = currentNoteTime();
+    const r = await api("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, reference_time: ref }) });
     renderHarness(r.model_info, r.harness);
+    if (amendFrom) {
+      appendAddendum(text, r, ref);
+    } else {
+      draft = r.record; rec = clone(r.record);
+      tagItems(rec); resetChanges();
+      modelInfo = { ...r.model_info, ...(asrMeta ? { asr_model: asrMeta.asr_model, asr_device: asrMeta.asr_device } : {}) };
+    }
     $("#signed").hidden = true;
     renderReview();
   } catch (e) { $("#extract-info").textContent = "⚠ " + e.message; }
-  btn.disabled = false; btn.textContent = "Extract Record";
+  btn.disabled = false; btn.textContent = extractLabel();
 };
+const extractLabel = () => (amendFrom ? `Extract & Add to ${amendFrom.incident}` : "Extract Record");
+
+// While amending, a dictated note is an addendum: its items are appended to the record being amended
+// and the note itself is signed with the amendment, so every added item stays grounded in its words.
+function appendAddendum(text, r, ref) {
+  if (amendFrom.addenda.some((a) => a.transcript === text)
+      && !confirm("This note was already added to the record as an addendum. Add its items again?")) return;
+  const add = r.record;
+  tagItems(add);
+  const uids = [];
+  for (const k of ["medications", "procedures", "vitals"]) {
+    for (const item of add[k]) { rec[k].push({ ...item, warnings: ["added by addendum", ...(item.warnings || [])] }); uids.push(item._uid); }
+  }
+  const filled = {};  // record fields the addendum filled in, so undo can restore them
+  for (const k of ["age", "weight_kg"]) {
+    if (rec.patient[k] == null && add.patient[k] != null) { filled[k] = add.patient[k]; rec.patient[k] = add.patient[k]; }
+  }
+  if (rec.patient.sex === "unknown" && add.patient.sex !== "unknown") { filled.sex = add.patient.sex; rec.patient.sex = add.patient.sex; }
+  if (!rec.chief_complaint && add.chief_complaint) { filled.chief_complaint = add.chief_complaint; rec.chief_complaint = add.chief_complaint; }
+  const addendum = { transcript: text, recorded_at: ref, audio_sha256: asrMeta?.audio_sha256 || null, model_info: r.model_info };
+  amendFrom.addenda.push(addendum);
+  const n = uids.length, num = amendFrom.addenda.length;
+  logChange({ type: "addendum", uids, filled, addendum,
+    label: `Addendum ${num}: added ${n} item${n === 1 ? "" : "s"} (“${text.length > 50 ? text.slice(0, 50) + "…" : text}”)` });
+  $("#extract-info").insertAdjacentHTML("afterbegin",
+    `<div class="small">Added ${n} item${n === 1 ? "" : "s"} to ${esc(amendFrom.incident)} from addendum ${num}. Review, give a reason, then sign.</div>`);
+}
 
 function renderHarness(info, h) {
   const mode = {
@@ -165,6 +211,7 @@ function renderReview() {
   $("#amend-bar").hidden = !amendFrom;
   if (amendFrom) $("#amend-what").textContent = `${amendFrom.incident} · ${amendFrom.label}`;
   $("#sign").textContent = amendFrom ? "Sign Amendment" : "Confirm & Sign";
+  $("#extract").textContent = extractLabel();
   $("#p-age").value = rec.patient.age ?? "";
   $("#p-sex").value = rec.patient.sex;
   $("#p-wt").value = rec.patient.weight_kg ?? "";
@@ -206,21 +253,90 @@ function renderReview() {
   $("#warn-count").textContent = n ? `· ${n} item${n > 1 ? "s" : ""} need attention` : "· no warnings";
   $("#confirm").checked = false;
   $("#sign").disabled = true;
+  renderChanges();
 }
+
+// ---------- change log: every edit in the review can be undone on its own ----------
+// Items carry a client-only `_uid` so a change still finds its item after rows are added or removed.
+// The server ignores unknown fields, so `_uid` never reaches a signed record.
+let changeLog = [], uidSeq = 0, changeSeq = 0;
+const LISTS = ["medications", "procedures", "vitals"];
+function tagItems(r) { for (const k of LISTS) for (const it of r[k]) it._uid ??= `u${++uidSeq}`; }
+function findItem(uid) {
+  for (const k of LISTS) { const i = rec[k].findIndex((it) => it._uid === uid); if (i >= 0) return { list: k, i, item: rec[k][i] }; }
+  return null;
+}
+const itemName = (list, it) => (list === "medications" ? it.drug : list === "procedures" ? it.name : it.type) || `new ${list.slice(0, -1)}`;
+const showVal = (v) => (v == null || v === "" ? "—" : typeof v === "string" && /T\d\d:\d\d/.test(v) ? hm(v) : String(v));
+function logChange(entry) {
+  changeLog.push({ ...entry, id: ++changeSeq, at: new Date().toTimeString().slice(0, 5) });
+  renderChanges();
+}
+function resetChanges() { changeLog = []; renderChanges(); }
+function renderChanges() {
+  const box = $("#changes");
+  box.hidden = !changeLog.length;
+  $("#change-count").textContent = changeLog.length;
+  $("#change-list").innerHTML = [...changeLog].reverse().map((c) => `
+    <li><span class="muted">${c.at}</span> ${esc(c.label)} <button class="link" data-undo="${c.id}">Undo</button></li>`).join("");
+}
+
+function undoChange(id) {
+  const c = changeLog.find((x) => x.id === id);
+  if (!c) return;
+  if (c.type === "edit") {
+    const target = c.uid ? findItem(c.uid)?.item : c.target === "patient" ? rec.patient : rec;
+    if (!target) { alert("That item is no longer in the record, so this change can't be undone."); return; }
+    Object.assign(target, c.restore);
+  } else if (c.type === "remove") {
+    rec[c.list].splice(Math.min(c.index, rec[c.list].length), 0, c.item);
+  } else if (c.type === "add") {
+    const f = findItem(c.uid);
+    if (f && !confirm(`Undo will remove the row “${itemName(f.list, f.item)}”. Continue?`)) return;
+    if (f) rec[f.list].splice(f.i, 1);
+  } else if (c.type === "addendum") {
+    const present = c.uids.map(findItem).filter(Boolean);
+    if (!confirm(`Undo this addendum? It removes its ${present.length} item(s) from the record.`)) return;
+    for (const uid of c.uids) { const f = findItem(uid); if (f) rec[f.list].splice(f.i, 1); }
+    amendFrom.addenda = amendFrom.addenda.filter((a) => a !== c.addendum);
+    for (const [k, v] of Object.entries(c.filled)) {  // put back fields the addendum filled, unless edited since
+      if (k === "chief_complaint") { if (rec.chief_complaint === v) rec.chief_complaint = null; }
+      else if (rec.patient[k] === v) rec.patient[k] = k === "sex" ? "unknown" : null;
+    }
+  }
+  changeLog = changeLog.filter((x) => x !== c);
+  renderReview();
+}
+$("#changes").addEventListener("click", (e) => {
+  if (e.target.dataset.undo) undoChange(+e.target.dataset.undo);
+  if (e.target.id === "undo-last" && changeLog.length) undoChange(changeLog[changeLog.length - 1].id);
+});
 
 $("#review-body").addEventListener("change", (e) => {
   const t = e.target, list = t.dataset.list;
   if (!list) return;
   const item = rec[list][+t.dataset.i], k = t.dataset.k;
+  const restore = { [k]: item[k] };
+  if (k === "drug") restore.rxnorm = item.rxnorm;
+  if (k === "name") restore.code = item.code;
   if (k === "time") item.time = setHM(item.time, t.value);
   else if (k === "dose_value") item.dose_value = t.value === "" ? null : parseFloat(t.value);
   else item[k] = t.value === "" ? null : t.value;
   if (k === "drug") item.rxnorm = null; // code no longer matches the edited name
   if (k === "name") item.code = null;
+  if (showVal(restore[k]) === showVal(item[k])) return;
+  logChange({ type: "edit", uid: item._uid, restore,
+    label: `${itemName(list, item)} · ${k.replace("_", " ")}: ${showVal(restore[k])} → ${showVal(item[k])}` });
 });
 $("#review-body").addEventListener("click", (e) => {
   const t = e.target;
-  if (t.dataset.del) { rec[t.dataset.del].splice(+t.dataset.i, 1); renderReview(); }
+  if (t.dataset.del) {
+    const list = t.dataset.del, index = +t.dataset.i, item = rec[list][index];
+    if (!confirm(`Remove “${itemName(list, item)}” from the record? You can undo this from the change list.`)) return;
+    rec[list].splice(index, 1);
+    logChange({ type: "remove", list, index, item, label: `Removed ${itemName(list, item)}` });
+    renderReview();
+  }
   if (t.dataset.add) {
     const now = new Date().toTimeString().slice(0, 5);
     const time = setHM(rec.reference_time, now);
@@ -229,14 +345,25 @@ $("#review-body").addEventListener("click", (e) => {
       procedures: { name: "", details: null, site: null, outcome: null, time, warnings: ["added manually"], evidence_found: false },
       vitals: { type: "HR", value: "", unit: null, time, warnings: ["added manually"], evidence_found: false },
     }[t.dataset.add];
+    blank._uid = `u${++uidSeq}`;
     rec[t.dataset.add].push(blank);
+    logChange({ type: "add", uid: blank._uid, label: `Added a ${t.dataset.add.slice(0, -1)} row` });
     renderReview();
   }
 });
-$("#p-age").onchange = (e) => (rec.patient.age = e.target.value || null);
-$("#p-sex").onchange = (e) => (rec.patient.sex = e.target.value);
-$("#p-wt").onchange = (e) => (rec.patient.weight_kg = e.target.value ? parseFloat(e.target.value) : null);
-$("#p-cc").onchange = (e) => (rec.chief_complaint = e.target.value || null);
+function patientField(id, target, key, parse) {
+  $(id).onchange = (e) => {
+    const obj = target === "patient" ? rec.patient : rec, old = obj[key], val = parse(e.target.value);
+    obj[key] = val;
+    if (showVal(old) !== showVal(val)) {
+      logChange({ type: "edit", target, restore: { [key]: old }, label: `${key.replace("_", " ")}: ${showVal(old)} → ${showVal(val)}` });
+    }
+  };
+}
+patientField("#p-age", "patient", "age", (v) => v || null);
+patientField("#p-sex", "patient", "sex", (v) => v);
+patientField("#p-wt", "patient", "weight_kg", (v) => (v ? parseFloat(v) : null));
+patientField("#p-cc", "record", "chief_complaint", (v) => v || null);
 $("#confirm").onchange = (e) => ($("#sign").disabled = !e.target.checked);
 
 // ---------- sign ----------
@@ -258,7 +385,7 @@ $("#sign").onclick = async () => {
       <span class="hash">${r.hash}</span><br>
       <a href="/records/${r.id}/report" target="_blank">Open report</a>
       <a href="/api/records/${r.id}/fhir" target="_blank">FHIR-lite JSON</a>`;
-    asrMeta = null;
+    resetChanges();
     newIncident();
     loadHistory(); refreshStatus();
   } catch (e) { alert(e.message); $("#sign").disabled = false; }
@@ -268,8 +395,9 @@ $("#sign").onclick = async () => {
 async function startAmend(versionId) {
   if (rec && $("#signed").hidden && !confirm("Discard the record you are reviewing and amend a signed one instead?")) return;
   const v = await api(`/api/records/${versionId}`);
-  amendFrom = { id: v.id, label: v.version_label, incident: v.incident_id };
+  amendFrom = { id: v.id, label: v.version_label, incident: v.incident_id, addenda: [] };
   draft = clone(v.final); rec = clone(v.final); modelInfo = v.model_info || {};
+  tagItems(rec); resetChanges();
   $("#amend-reason").value = "";
   $("#signed").hidden = true;
   renderReview();
@@ -280,9 +408,11 @@ function endAmend() {
   amendFrom = null;
   $("#amend-bar").hidden = true;
   $("#sign").textContent = "Confirm & Sign";
+  $("#extract").textContent = extractLabel();
 }
 $("#amend-cancel").onclick = () => {
-  endAmend(); draft = null; rec = null;
+  if (changeLog.length && !confirm(`Discard the amendment and its ${changeLog.length} change(s)?`)) return;
+  endAmend(); draft = null; rec = null; resetChanges();
   $("#review-body").hidden = true; $("#review-empty").hidden = false; $("#warn-count").textContent = "";
 };
 async function signAmendment() {
@@ -292,7 +422,7 @@ async function signAmendment() {
   try {
     const r = await api(`/api/records/${amendFrom.id}/amend`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ responder_id: $("#responder").value, reason, final: rec }),
+      body: JSON.stringify({ responder_id: $("#responder").value, reason, final: rec, addenda: amendFrom.addenda }),
     });
     const label = r.history.versions.find((v) => v.id === r.id).label;
     $("#signed").hidden = false;
@@ -301,7 +431,7 @@ async function signAmendment() {
       <span class="small">parent ${amendFrom.label}: <span class="hash">${r.parent_hash.slice(0, 24)}…</span></span><br>
       <a href="/records/${r.id}/report" target="_blank">Open report</a>
       <a href="#" data-open-hist="${r.id}">View history</a>`;
-    endAmend();
+    endAmend(); resetChanges();
     loadHistory(); refreshStatus();
   } catch (e) { alert(e.message); $("#sign").disabled = false; }
 }
@@ -331,7 +461,9 @@ $("#t-history").addEventListener("click", (e) => {
 // ---------- version graph ----------
 let hist = null, selected = null;
 const fmtTime = (iso) => new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
-function diffTable(changes) {  // rows from the server's describe_edits: {label, before, after, change}
+function diffTable(changes, edits = []) {  // rows from the server's describe_edits: {label, before, after, change}
+  // a server older than this page sends only raw edits: show them plainly rather than failing
+  changes ??= edits.map((e) => ({ label: e.field, before: String(e.machine ?? "—"), after: String(e.human ?? "—"), change: "changed" }));
   if (!changes.length) return `<p class="muted">No clinical changes.</p>`;
   return `<table><tbody>${changes.map((c) => `<tr><td>${esc(c.label)}${c.change !== "changed" ? ` <span class="muted">(${c.change})</span>` : ""}</td>
     <td><span class="diff-old">${esc(c.before)}</span> → <span class="diff-new">${esc(c.after)}</span></td></tr>`).join("")}</tbody></table>`;
@@ -403,7 +535,7 @@ function renderHistory() {
       ${v.parent ? `<dt>Parent hash</dt><dd class="hash">${v.parent_hash}</dd>` : ""}
     </dl>
     <b>${v.kind === "create" ? "Responder edits to the machine draft" : `Changes from ${v.parent_label}`}</b>
-    ${diffTable(v.changes)}
+    ${diffTable(v.changes, v.edits)}
     ${others.length ? `<div class="hist-actions"><label class="inline">Compare with
       <select id="cmp">${["", ...others.map((o) => o.id)].map((id) => `<option value="${id}">${id ? byId[id].label : "—"}</option>`).join("")}</select></label></div>
       <div id="cmp-out"></div>` : ""}
@@ -419,7 +551,7 @@ function renderHistory() {
   if ($("#cmp")) $("#cmp").onchange = async (e) => {
     if (!e.target.value) { $("#cmp-out").innerHTML = ""; return; }
     const d = await api(`/api/records/${v.id}/diff/${e.target.value}`);
-    $("#cmp-out").innerHTML = `<p class="small muted">From ${v.label} to ${byId[e.target.value].label}:</p>${diffTable(d.changes)}`;
+    $("#cmp-out").innerHTML = `<p class="small muted">From ${v.label} to ${byId[e.target.value].label}:</p>${diffTable(d.changes, d.edits)}`;
   };
   if ($("#h-switch")) $("#h-switch").onclick = async () => {
     const reason = $("#h-reason").value.trim();
@@ -450,9 +582,9 @@ $("#verify").onclick = async () => {
 // ---------- new entry ----------
 function resetEntry() {
   $("#note").value = "";
-  noteTime = null; $("#note-time").value = "";
+  liveNoteTime();
   asrMeta = null; draft = null; rec = null; modelInfo = {};
-  endAmend();
+  endAmend(); resetChanges();
   $("#asr-info").textContent = ""; $("#extract-info").textContent = ""; $("#rec-timer").textContent = "00:00";
   $("#review-body").hidden = true; $("#review-empty").hidden = false;
   $("#signed").hidden = true; $("#warn-count").textContent = "";
@@ -465,22 +597,35 @@ $("#new-entry").onclick = () => {
   resetEntry();
 };
 
-// typed notes: the note's time is when typing started
+// the transcript is only ever cleared by hand
+$("#clear-note").onclick = () => {
+  $("#note").value = ""; liveNoteTime(); asrMeta = null;
+  $("#asr-info").textContent = ""; $("#rec-timer").textContent = "00:00";
+  $("#note").focus();
+};
+
+// emptying the note releases a recording's pinned time (a time set by hand stays until cleared)
 $("#note").addEventListener("input", (e) => {
-  if (!e.target.value.trim()) { noteTime = null; $("#note-time").value = ""; }
-  else if (!noteTime) setNoteTime(localIso(new Date()));
+  if (!e.target.value.trim() && noteTimeSource === "recording") liveNoteTime();
 });
 $("#note-time").onchange = (e) => {
-  if (e.target.value) noteTime = (noteTime || localIso(new Date())).replace(/T\d\d:\d\d(:\d\d)?/, `T${e.target.value}:00`);
+  if (!e.target.value) { liveNoteTime(); return; }
+  setNoteTime(localIso(new Date()).replace(/T\d\d:\d\d(:\d\d)?/, `T${e.target.value}:00`), "manual");
 };
+$("#note-time").onblur = tickNoteTime;
+setInterval(tickNoteTime, 10000);
 
 // ---------- init ----------
 for (const k of Object.keys(SAMPLES)) $("#samples").insertAdjacentHTML("beforeend", `<option>${esc(k)}</option>`);
 $("#samples").onchange = (e) => {
-  if (SAMPLES[e.target.value]) { $("#note").value = SAMPLES[e.target.value]; asrMeta = null; setNoteTime(localIso(new Date())); }
+  if (SAMPLES[e.target.value]) {
+    $("#note").value = SAMPLES[e.target.value]; asrMeta = null;
+    if (noteTimeSource === "recording") liveNoteTime();
+  }
   e.target.value = "";
 };
 newIncident();
+tickNoteTime();
 loadHistory();
 // Poll fast until the local LLM is up, then slowly so the badges stay truthful.
 (async function pollStatus() {

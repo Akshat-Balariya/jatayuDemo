@@ -123,10 +123,18 @@ class SaveRequest(BaseModel):
     model_info: dict = {}
 
 
+class Addendum(BaseModel):
+    transcript: str                     # a follow-up note dictated while amending
+    recorded_at: Optional[str] = None   # its note time (ISO)
+    audio_sha256: Optional[str] = None
+    model_info: dict = {}
+
+
 class AmendRequest(BaseModel):
     responder_id: str
     reason: str             # required: why the signed record is being corrected
     final: ClinicalRecord   # the corrected record
+    addenda: list[Addendum] = []
 
 
 class SwitchRequest(BaseModel):

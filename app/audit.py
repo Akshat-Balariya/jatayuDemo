@@ -130,8 +130,10 @@ def _current(rows: list[dict], lineage: str) -> str | None:
     return cur
 
 
-def _check_same_source(parent: dict, final: dict) -> None:
-    """An amendment corrects the same dictation; a different note must be signed as a new record."""
+def _check_same_source(parent: dict, final: dict, transcript: str) -> None:
+    """An amendment corrects or extends the same record. Every quoted item must come from the record's
+    transcript (the original dictation plus any addenda signed with this amendment); a different note
+    must be signed as a new record."""
     from .normalize import evidence_in_transcript  # local import: normalize is heavier than this module
 
     if final.get("reference_time") != (parent["final"] or {}).get("reference_time"):
@@ -139,10 +141,25 @@ def _check_same_source(parent: dict, final: dict) -> None:
                            "being amended); sign it as a new record instead")
     foreign = [item["evidence"] for key in ("medications", "procedures", "vitals")
                for item in final.get(key) or []
-               if item.get("evidence") and not evidence_in_transcript(item["evidence"], parent["transcript"] or "")]
+               if item.get("evidence") and not evidence_in_transcript(item["evidence"], transcript)]
     if foreign:
-        raise HistoryError("this looks like a different note: these quotes are not in the record's transcript: "
-                           + "; ".join(f"“{q}”" for q in foreign[:3]) + ". Sign it as a new record instead")
+        raise HistoryError("these quotes are not in the record's transcript or its addendum: "
+                           + "; ".join(f"“{q}”" for q in foreign[:3]) + ". Sign a different note as a new record")
+
+
+def _with_addenda(parent: dict, addenda: list[dict]) -> tuple[str, dict]:
+    """The amended version's transcript (original + addenda) and model_info (addendum audio and models)."""
+    transcript = parent["transcript"] or ""
+    for a in addenda:
+        stamp = (a.get("recorded_at") or "")[11:16]
+        transcript += f"\n\n[Addendum{' ' + stamp if stamp else ''}] {a['transcript'].strip()}"
+    info = dict(parent["model_info"] or {})
+    if addenda:
+        info["addenda"] = [*info.get("addenda", []), *[
+            {"recorded_at": a.get("recorded_at"), "audio_sha256": a.get("audio_sha256"),
+             "transcript_sha256": hashlib.sha256(a["transcript"].strip().encode("utf-8")).hexdigest(),
+             "model_info": a.get("model_info") or {}} for a in addenda]]
+    return transcript, info
 
 
 # Fields that are bookkeeping, not clinical content: kept in the stored diff, hidden when shown to people.
@@ -211,26 +228,35 @@ def append(*, incident_id: str, responder_id: str, transcript: str, language: st
         })
 
 
-def amend(version_id: str, *, responder_id: str, reason: str, final: dict) -> dict:
-    """Sign a corrected version made from `version_id` (any version: an older one starts a branch)."""
+def amend(version_id: str, *, responder_id: str, reason: str, final: dict,
+          addenda: list[dict] | None = None) -> dict:
+    """Sign a corrected version made from `version_id` (any version: an older one starts a branch).
+
+    `addenda` are follow-up notes dictated while amending ({transcript, recorded_at, audio_sha256,
+    model_info}); they are appended to the record's transcript so the items they add stay grounded.
+    """
     if not (reason or "").strip():
         raise HistoryError("a reason is required to amend a signed record")
+    addenda = [a for a in addenda or [] if (a.get("transcript") or "").strip()]
     with _conn() as c:
         rows = _all(c)
         parent = next((r for r in rows if r["id"] == version_id), None)
         if parent is None or parent["kind"] not in VERSION_KINDS:
             raise HistoryError(f"no record version {version_id!r}")
-        _check_same_source(parent, final)
+        transcript, model_info = _with_addenda(parent, addenda)
+        _check_same_source(parent, final, transcript)
         edits = diff_records(parent["final"], final)
         if not edits:
             raise HistoryError("nothing changed compared with the version being amended")
         return _insert(c, {
             "id": uuid.uuid4().hex[:12], "kind": "amend", "lineage": parent["lineage"],
             "parent": parent["id"], "parent_hash": parent["hash"], "reason": reason.strip(), "target": None,
-            # the source of the record does not change, only its content
             "incident_id": parent["incident_id"], "responder_id": responder_id, "language": parent["language"],
-            "transcript": parent["transcript"], "transcript_sha256": parent["transcript_sha256"],
-            "audio_sha256": parent["audio_sha256"], "model_info": parent["model_info"],
+            # the original source plus any addenda; the original recording's audio hash is kept
+            "transcript": transcript,
+            "transcript_sha256": hashlib.sha256(transcript.encode("utf-8")).hexdigest() if addenda
+            else parent["transcript_sha256"],
+            "audio_sha256": parent["audio_sha256"], "model_info": model_info,
             "draft": parent["final"], "final": final, "edits": edits,
         })
 
