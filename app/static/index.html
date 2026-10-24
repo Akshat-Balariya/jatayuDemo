@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Field-to-Record</title>
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 <header>
@@ -66,6 +66,14 @@
     <h2><span class="step">2</span> Review <span class="muted small" id="warn-count"></span></h2>
     <div id="review-empty" class="empty">Extracted medications, procedures and vitals will appear here for the responder to check.</div>
     <div id="review-body" hidden>
+      <div id="amend-bar" class="amend-bar" hidden>
+        <div class="row tight">
+          <span>Amending <b id="amend-what"></b> — the signed version stays unchanged; this becomes a new version linked to it by hash.</span>
+          <span class="spacer"></span>
+          <button id="amend-cancel" class="ghost">Cancel</button>
+        </div>
+        <label>Reason for amendment<input id="amend-reason" placeholder="e.g. dose corrected after checking the vial"></label>
+      </div>
       <div class="grid4">
         <label>Age<input id="p-age"></label>
         <label>Sex<select id="p-sex"><option>unknown</option><option>male</option><option>female</option></select></label>
@@ -108,12 +116,29 @@
     </h2>
     <div id="verify-result" class="small"></div>
     <div class="table-wrap"><table id="t-history">
-      <thead><tr><th>#</th><th>Signed</th><th>Incident</th><th>Responder</th><th>Meds</th><th>Procs</th><th>Edits</th><th>Hash</th><th></th></tr></thead>
+      <thead><tr><th>#</th><th>Last change</th><th>Incident</th><th>Responder</th><th>Meds</th><th>Procs</th><th>Versions</th><th>Current hash</th><th></th></tr></thead>
       <tbody></tbody>
     </table></div>
   </section>
 </main>
+<dialog id="hist-dlg">
+  <div class="dlg-head">
+    <div>
+      <h2 id="hist-title">Record history</h2>
+      <div class="muted small" id="hist-sub"></div>
+    </div>
+    <button class="x" id="hist-close" title="Close">✕</button>
+  </div>
+  <div class="hist-body">
+    <div class="graph-wrap"><svg id="hist-graph" aria-label="Version graph"></svg>
+      <div class="legend small muted"><span class="lg cur"></span> current <span class="lg"></span> version · each arrow is a parent → child hash link</div>
+    </div>
+    <div id="hist-detail" class="hist-detail"></div>
+  </div>
+  <h3>Signed events</h3>
+  <div class="table-wrap"><table id="hist-events"><tbody></tbody></table></div>
+</dialog>
 <footer class="muted small">Documentation aid only — not clinical decision support. Synthetic data only; no real PHI.</footer>
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

@@ -6,6 +6,13 @@
       "runtimeExecutable": ".venv/Scripts/python.exe",
       "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--port", "8000"],
       "port": 8000
+    },
+    {
+      "name": "field-to-record-test",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--port", "8001"],
+      "env": {"FTR_DATA_DIR": "C:/Users/aksha/AppData/Local/Temp/claude/D--Development-JatayuDemo/705dda6a-374d-4721-a30c-3089126e33e9/scratchpad/testdata"},
+      "port": 8001
     }
   ]
 }

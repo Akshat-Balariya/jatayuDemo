@@ -123,6 +123,18 @@ class SaveRequest(BaseModel):
     model_info: dict = {}
 
 
+class AmendRequest(BaseModel):
+    responder_id: str
+    reason: str             # required: why the signed record is being corrected
+    final: ClinicalRecord   # the corrected record
+
+
+class SwitchRequest(BaseModel):
+    responder_id: str
+    reason: str
+    target: str             # version id that becomes current
+
+
 # ---------- FHIR-lite ----------
 
 def to_fhir_lite(record_id: str, saved: dict) -> dict:
@@ -193,7 +205,15 @@ def to_fhir_lite(record_id: str, saved: dict) -> dict:
             {"type": "assembler", "who": f"device:{saved['device_id']}", "model": saved.get("model_info")},
         ],
         "signature": {"type": "sha256-hash-chain", "hash": saved["hash"], "prevHash": saved["prev_hash"]},
-        "entity": {"transcriptSha256": saved.get("transcript_sha256"), "audioSha256": saved.get("audio_sha256")},
+        "entity": [
+            {"role": "source", "transcriptSha256": saved.get("transcript_sha256"), "audioSha256": saved.get("audio_sha256")},
+            # an amended version records the version it revises, by id and hash
+            *([{"role": "revision", "what": f"Bundle/{saved['parent']}", "hash": saved.get("parent_hash")}]
+              if saved.get("parent") else []),
+        ],
+        "reason": saved.get("reason"),
+        "version": {"label": saved.get("version_label"), "of": saved.get("version_count"),
+                    "isCurrent": saved.get("is_current"), "record": saved.get("lineage")},
     })
     return {"resourceType": "Bundle", "type": "collection", "id": record_id,
             "timestamp": saved["created_at"], "entry": entries}

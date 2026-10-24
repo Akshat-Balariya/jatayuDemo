@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import asr, audit, config, extractor, report
 from .normalize import normalize
-from .schemas import ExtractRequest, SaveRequest, to_fhir_lite
+from .schemas import AmendRequest, ExtractRequest, SaveRequest, SwitchRequest, to_fhir_lite
 
 app = FastAPI(title="Field-to-Record")
 
@@ -88,23 +88,58 @@ def save(req: SaveRequest):
 
 @app.get("/api/records")
 def list_records():
-    return [
-        {k: r[k] for k in ("id", "seq", "created_at", "incident_id", "responder_id", "hash")}
-        | {"meds": len(r["final"]["medications"]), "procs": len(r["final"]["procedures"]), "edits": len(r["edits"] or [])}
-        for r in audit.list_records()
-    ]
+    """One row per record, showing its current version."""
+    return audit.list_lineages()
 
 
 def _get(record_id: str) -> dict:
-    rec = audit.get(record_id)
+    rec = audit.version_info(record_id)
     if not rec:
-        raise HTTPException(404, "record not found")
+        raise HTTPException(404, "record version not found")
     return rec
 
 
 @app.get("/api/records/{record_id}")
 def get_record(record_id: str):
     return _get(record_id)
+
+
+@app.post("/api/records/{record_id}/amend")
+def amend(record_id: str, req: AmendRequest):
+    """Sign a corrected version made from `record_id`; amending an older version starts a branch."""
+    try:
+        rec = audit.amend(record_id, responder_id=req.responder_id, reason=req.reason, final=req.final.model_dump())
+    except audit.HistoryError as e:
+        raise HTTPException(400, str(e))
+    return {"id": rec["id"], "seq": rec["seq"], "hash": rec["hash"], "parent": rec["parent"],
+            "parent_hash": rec["parent_hash"], "edits": rec["edits"], "history": audit.history(rec["id"])}
+
+
+@app.post("/api/records/{record_id}/switch")
+def switch(record_id: str, req: SwitchRequest):
+    """Sign the decision that another version of this record is current."""
+    try:
+        ev = audit.switch(record_id, req.target, responder_id=req.responder_id, reason=req.reason)
+    except audit.HistoryError as e:
+        raise HTTPException(400, str(e))
+    return {"id": ev["id"], "seq": ev["seq"], "hash": ev["hash"], "history": audit.history(ev["id"])}
+
+
+@app.get("/api/records/{record_id}/history")
+def history(record_id: str):
+    h = audit.history(record_id)
+    if not h:
+        raise HTTPException(404, "record not found")
+    return h
+
+
+@app.get("/api/records/{a}/diff/{b}")
+def diff(a: str, b: str):
+    va, vb = _get(a), _get(b)
+    if va["lineage"] != vb["lineage"]:
+        raise HTTPException(400, "versions belong to different records")
+    edits = audit.diff_records(va["final"], vb["final"])
+    return {"from": a, "to": b, "edits": edits, "changes": audit.describe_edits(edits)}
 
 
 @app.get("/api/records/{record_id}/fhir")

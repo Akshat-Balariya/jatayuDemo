@@ -36,7 +36,9 @@
 | F19 | Model warm-up on startup | `app/main.py` | Built |
 | F20 | Configuration via environment variables | `app/config.py` | Built |
 | F21 | Evaluation harness | `eval/run_eval.py` | Built |
-| F22 | Unit tests | `tests/test_core.py` | Built |
+| F22 | Unit tests | `tests/test_core.py`, `tests/test_history.py` | Built |
+| F23 | Hash-linked version graph: amendments, branches, signed "make current" switches | `app/audit.py`, `app/main.py` | Built |
+| F24 | Record history view (version graph, diffs, compare, switch) | `app/static/` | Built |
 
 ---
 
@@ -187,6 +189,7 @@ draft record
   - `prev_hash` mismatch (rows reordered or replaced)
   - content changed after signing
 - Exposed through the API, the UI "Verify chain" button and the health status pill.
+- It then checks every version-graph link (F23): a version's parent exists earlier in the log, belongs to the same record and has the hash the version committed to; a switch starts from the version that was current and targets an earlier version of the same record.
 - `scripts/tamper_demo.py` silently multiplies a signed dose by 10 in the DB to show the chain breaking; `--restore` undoes it.
 
 ### F15 — Printable report
@@ -207,7 +210,7 @@ draft record
 - "FHIR-lite" means FHIR-shaped but not validated against the FHIR R4 profiles.
 
 ### F17 — Audit chain history
-- A table of all signed records, newest first: seq, signed time, incident, responder, medication count, procedure count, edit count, short hash, and report and JSON links.
+- A table of all signed records (one row per record, showing its current version), most recently changed first: seq, last change, incident, responder, medication count, procedure count, version count (with a branch badge), current hash, and History, Amend, report and JSON actions.
 
 ### F18 — Health and status
 - `GET /api/health` returns LLM status (model present in Ollama), ASR status (loaded, model, device), chain status and device ID.
@@ -241,6 +244,24 @@ draft record
 ### F22 — Unit tests
 - `pytest -q`, no LLM needed. Covers drug synonyms, unknown drugs, routes, units, procedures, time resolution, missing-time default, dose-limit warning, evidence check, hallucination flag in `normalize`, chain integrity and tamper detection, and deleted-row detection.
 
+### F23 — Hash-linked version graph (implements P1 and P2)
+- Every chain entry has a `kind`:
+  - `create`: the first version (v1) of a record; its `lineage` (record id) is its own id.
+  - `amend`: a new version; `parent` = the version it was made from, `parent_hash` = that version's hash. Requires a non-empty `reason` and at least one changed field. Transcript, audio hash, incident and model info are inherited; `draft` = parent's final, `edits` = field diff parent → new.
+  - `switch`: a signed decision that another version is current; `parent`/`parent_hash` = the version that was current, `target` = the version that becomes current, `edits` = diff between them. Requires a reason.
+- `kind`, `lineage`, `parent`, `parent_hash`, `reason` and `target` are covered by the entry's hash, so each version commits to its parent like a git commit. Amending an older version starts a branch.
+- Current version = the newest version created in the record, unless a later switch names another.
+- Hashing is versioned (`hash_v`): entries signed before the graph existed keep verifying with the v1 field list; the store migrates in place.
+- FHIR `Provenance.entity` lists the revised version (`role = revision`, id and hash); the report shows "Version vN of M", the reason, and a link to the current version when it isn't current.
+
+### F24 — Record history view
+- "History" opens a dialog with the version graph (depth on x, one row per branch; arrows are parent → child hash links; the current version is filled).
+- Selecting a version shows its type, signer, time, reason, hash, parent hash and its field changes from the parent; it can be compared with any other version.
+- Actions: open the version's report, amend from it (an older version starts a new branch), or make it current with a required reason.
+- A table lists every signed event for the record: created, amended (from → to), made current (was → now), with responder, reason and hash.
+
+---
+
 ---
 
 ## 4. API reference
@@ -251,8 +272,12 @@ draft record
 | POST | `/api/transcribe` | multipart `audio`, `language` → transcript, segments, audio hash |
 | POST | `/api/extract` | `{text, reference_time?}` → `{record, raw, model_info}` (400 empty, 503 LLM down) |
 | POST | `/api/records` | Sign and append a record → `{id, seq, hash, edits}` |
-| GET | `/api/records` | List of record summaries |
-| GET | `/api/records/{id}` | Full stored record (404 if missing) |
+| GET | `/api/records` | One summary per record (current version, version and branch counts) |
+| GET | `/api/records/{id}` | A stored version plus its place in the history (404 if missing) |
+| POST | `/api/records/{id}/amend` | `{responder_id, reason, final}` → new version linked to `{id}` by hash (400 no reason / no change) |
+| POST | `/api/records/{id}/switch` | `{responder_id, reason, target}` → signed switch of the current version (400 invalid target) |
+| GET | `/api/records/{id}/history` | Version graph of the record: versions, children, current, signed events |
+| GET | `/api/records/{a}/diff/{b}` | Field diff between two versions of the same record |
 | GET | `/api/records/{id}/fhir` | FHIR-lite bundle |
 | GET | `/records/{id}/report` | HTML report |
 | GET | `/api/audit/verify` | Chain verification result |
@@ -279,7 +304,6 @@ draft record
 - No authentication. Responder ID is free text and nobody signs cryptographically per user or device; the chain shows tampering but doesn't prove who wrote a record. *(Device signatures planned: P3.)*
 - A hash chain on a single device: someone who can rewrite the whole DB can rebuild a valid chain. *(Mitigated by P3.)*
 - Raw audio is not stored, only its hash. *(Planned: P4.)*
-- Records can't be amended after signing. *(Planned: P1, then P2.)*
 - RxNorm codes and dose limits are demo-grade and not verified against a current release.
 - Procedure codes are local, not SNOMED CT.
 - FHIR output is not validated against R4 profiles.
@@ -292,7 +316,7 @@ draft record
 
 Audience for these specs: engineers.
 
-### P1 — Record amendments (addenda) · next
+### P1 — Record amendments (addenda) · built (F23)
 - A signed record is never changed. A correction is a **new record** in the chain that points to the record it amends (`amends: <record id>`).
 - The addendum holds the full corrected record, a field-level diff against the version it amends (same format as F13), the responder ID and a required reason.
 - The addendum is hashed and chained like any other record, so the original and every correction stay verifiable.
@@ -301,7 +325,7 @@ Audience for these specs: engineers.
 - UI: an "Amend" action on a signed record opens the review editor pre-filled from the latest version.
 - API (proposed): `POST /api/records/{id}/amend`, `GET /api/records/{id}/versions`.
 
-### P2 — Version tree with branches · later
+### P2 — Version tree with branches · built (F23, F24)
 - Generalises P1: each record version has a parent, so the versions of a record form a **tree**, not just a line.
 - Amending an older version starts a new branch instead of overwriting the newer one.
 - Users can view any branch, compare two versions (field diff), and **switch** which branch is the current one.

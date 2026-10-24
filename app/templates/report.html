@@ -14,6 +14,8 @@
   th { font-size: 11px; color: #666; font-weight: 600; }
   .muted { color: #777; }
   .edited { background: #fff6d6; }
+  .version { margin-top: 10px; padding: 8px 12px; border-radius: 6px; background: #eef4ff; }
+  .version.stale { background: #fff1f0; }
   .hash { font-family: Consolas, monospace; font-size: 11px; word-break: break-all; }
   .transcript { white-space: pre-wrap; background: #f6f6f6; padding: 10px; border-radius: 6px; }
   .print { float: right; }
@@ -24,6 +26,13 @@
 <button class="print" onclick="window.print()">Print / Save PDF</button>
 <h1>Pre-hospital Medication &amp; Procedure Record</h1>
 <div class="muted">Generated on-device by Field-to-Record &middot; responder-confirmed</div>
+{% if rec.version_count > 1 %}
+<div class="version {{ 'stale' if not rec.is_current else '' }}">
+  Version {{ rec.version_label }} of {{ rec.version_count }}{% if rec.parent_label %}, amended from {{ rec.parent_label }}{% endif %}
+  {% if rec.reason %} &middot; Reason: <i>{{ rec.reason }}</i>{% endif %}
+  {% if not rec.is_current %}<br><b>Not the current version.</b> <a href="/records/{{ rec.current_id }}/report">Open current version ({{ rec.current_label }})</a>{% endif %}
+</div>
+{% endif %}
 
 <div class="meta">
   <div><span>Incident</span>{{ rec.incident_id }}</div>
@@ -79,15 +88,17 @@
   <tr><th>Record</th><td class="hash">{{ rec.id }} (seq {{ rec.seq }})</td></tr>
   <tr><th>Hash</th><td class="hash">{{ rec.hash }}</td></tr>
   <tr><th>Previous hash</th><td class="hash">{{ rec.prev_hash }}</td></tr>
+  {% if rec.parent %}<tr><th>Parent version</th><td class="hash">{{ rec.parent_label }} &middot; {{ rec.parent_hash }}</td></tr>{% endif %}
   <tr><th>Transcript SHA-256</th><td class="hash">{{ rec.transcript_sha256 }}</td></tr>
   <tr><th>Audio SHA-256</th><td class="hash">{{ rec.audio_sha256 or "typed note (no audio)" }}</td></tr>
   <tr><th>Models</th><td class="hash">{{ rec.model_info | tojson }}</td></tr>
-  <tr><th>Human edits</th><td>{{ rec.edits | length }} field(s) changed from machine draft{% if rec.edits %} (highlighted){% endif %}</td></tr>
+  <tr><th>{{ 'Changes' if rec.kind == 'amend' else 'Human edits' }}</th><td>{{ changes | length }} change(s) from {{ 'version ' ~ rec.parent_label if rec.kind == 'amend' else 'the machine draft' }}{% if changes %} (rows highlighted above){% endif %}</td></tr>
 </table>
-{% if rec.edits %}
+{% if changes %}
 <table>
-  <tr><th>Field</th><th>Machine</th><th>Responder</th></tr>
-  {% for e in rec.edits %}<tr><td class="hash">{{ e.field }}</td><td>{{ e.machine }}</td><td>{{ e.human }}</td></tr>{% endfor %}
+  <tr><th style="width:34%">What</th><th>{{ rec.parent_label if rec.kind == 'amend' else 'Machine' }}</th><th>{{ rec.version_label if rec.kind == 'amend' else 'Responder' }}</th></tr>
+  {% for c in changes %}<tr><td>{{ c.label }}{% if c.change != 'changed' %} <span class="muted">({{ c.change }})</span>{% endif %}</td>
+    <td>{% if c.change == 'removed' %}<s>{{ c.before }}</s>{% else %}{{ c.before }}{% endif %}</td><td>{{ c.after }}</td></tr>{% endfor %}
 </table>
 {% endif %}
 <p class="muted" style="margin-top:24px">Documentation aid only. Not clinical decision support. Contains no real patient data.</p>

@@ -17,6 +17,7 @@ let rec = null;         // record being edited
 let modelInfo = {};
 let asrMeta = null;     // {audio_sha256, language, ...}
 let noteTime = null;    // ISO time the note was recorded/started; unstated & relative times resolve against it
+let amendFrom = null;   // {id, label, incident} while correcting a signed version
 
 // ---------- utils ----------
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -58,7 +59,7 @@ async function refreshStatus() {
     else if (!l.loaded) set("#st-llm", true, `LLM ${l.model} · loading…`, "warn");
     else set("#st-llm", true, `LLM ${l.model} · ready`);
     set("#st-asr", true, h.asr.loaded ? `ASR ${h.asr.asr_model} · ${h.asr.asr_device}` : `ASR ${h.asr.asr_model} (loads on first use)`, h.asr.loaded ? "ok" : "warn");
-    set("#st-chain", h.audit.ok, h.audit.ok ? `Chain OK · ${h.audit.count} records` : "Chain BROKEN");
+    set("#st-chain", h.audit.ok, h.audit.ok ? `Chain OK · ${h.audit.records} records · ${h.audit.versions} versions` : "Chain BROKEN");
     if (!h.llm.ok && h.llm.error) $("#st-llm").title = h.llm.error;
     return l.loaded;
   } catch { $("#st-llm").textContent = "server offline"; $("#st-llm").className = "pill bad"; return false; }
@@ -108,6 +109,11 @@ $("#rec").onclick = async () => {
 $("#extract").onclick = async () => {
   const text = $("#note").value.trim();
   if (!text) return;
+  if (amendFrom) {  // a new dictation is a new record, never a version of the one being amended
+    if (!confirm(`You are amending ${amendFrom.incident} ${amendFrom.label}.\n\nExtracting this note will start a NEW record instead, and the amendment will be discarded. Continue?`)) return;
+    endAmend();
+    newIncident();
+  }
   const btn = $("#extract");
   btn.disabled = true; btn.textContent = "Extracting…";
   $("#extract-info").textContent = "";
@@ -120,7 +126,7 @@ $("#extract").onclick = async () => {
     $("#signed").hidden = true;
     renderReview();
   } catch (e) { $("#extract-info").textContent = "⚠ " + e.message; }
-  btn.disabled = false; btn.textContent = "Extract record →";
+  btn.disabled = false; btn.textContent = "Extract Record";
 };
 
 // ---------- review ----------
@@ -140,6 +146,9 @@ const del = (list, i) => `<button class="x" title="Remove" data-del="${list}" da
 function renderReview() {
   $("#review-empty").hidden = true;
   $("#review-body").hidden = false;
+  $("#amend-bar").hidden = !amendFrom;
+  if (amendFrom) $("#amend-what").textContent = `${amendFrom.incident} · ${amendFrom.label}`;
+  $("#sign").textContent = amendFrom ? "Sign Amendment" : "Confirm & Sign";
   $("#p-age").value = rec.patient.age ?? "";
   $("#p-sex").value = rec.patient.sex;
   $("#p-wt").value = rec.patient.weight_kg ?? "";
@@ -217,6 +226,7 @@ $("#confirm").onchange = (e) => ($("#sign").disabled = !e.target.checked);
 // ---------- sign ----------
 $("#sign").onclick = async () => {
   if (rec.medications.some((m) => !m.drug) || rec.procedures.some((p) => !p.name)) { alert("Fill in or remove empty rows first."); return; }
+  if (amendFrom) return signAmendment();
   $("#sign").disabled = true;
   try {
     const r = await api("/api/records", {
@@ -238,21 +248,186 @@ $("#sign").onclick = async () => {
   } catch (e) { alert(e.message); $("#sign").disabled = false; }
 };
 
-// ---------- history ----------
+// ---------- amend a signed version ----------
+async function startAmend(versionId) {
+  if (rec && $("#signed").hidden && !confirm("Discard the record you are reviewing and amend a signed one instead?")) return;
+  const v = await api(`/api/records/${versionId}`);
+  amendFrom = { id: v.id, label: v.version_label, incident: v.incident_id };
+  draft = clone(v.final); rec = clone(v.final); modelInfo = v.model_info || {};
+  $("#amend-reason").value = "";
+  $("#signed").hidden = true;
+  renderReview();
+  $("#review").scrollIntoView({ behavior: "smooth", block: "start" });
+  $("#amend-reason").focus();
+}
+function endAmend() {
+  amendFrom = null;
+  $("#amend-bar").hidden = true;
+  $("#sign").textContent = "Confirm & Sign";
+}
+$("#amend-cancel").onclick = () => {
+  endAmend(); draft = null; rec = null;
+  $("#review-body").hidden = true; $("#review-empty").hidden = false; $("#warn-count").textContent = "";
+};
+async function signAmendment() {
+  const reason = $("#amend-reason").value.trim();
+  if (!reason) { alert("Enter a reason for the amendment."); $("#amend-reason").focus(); return; }
+  $("#sign").disabled = true;
+  try {
+    const r = await api(`/api/records/${amendFrom.id}/amend`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ responder_id: $("#responder").value, reason, final: rec }),
+    });
+    const label = r.history.versions.find((v) => v.id === r.id).label;
+    $("#signed").hidden = false;
+    $("#signed").innerHTML = `✓ Signed ${esc(amendFrom.incident)} ${label}, amended from ${amendFrom.label} · ${r.edits.length} field(s) changed<br>
+      <span class="hash">${r.hash}</span><br>
+      <span class="small">parent ${amendFrom.label}: <span class="hash">${r.parent_hash.slice(0, 24)}…</span></span><br>
+      <a href="/records/${r.id}/report" target="_blank">Open report</a>
+      <a href="#" data-open-hist="${r.id}">View history</a>`;
+    endAmend();
+    loadHistory(); refreshStatus();
+  } catch (e) { alert(e.message); $("#sign").disabled = false; }
+}
+$("#signed").addEventListener("click", (e) => {
+  const id = e.target.dataset.openHist;
+  if (id) { e.preventDefault(); openHistory(id); }
+});
+
+// ---------- record list ----------
 async function loadHistory() {
   const rows = await api("/api/records");
   $("#t-history tbody").innerHTML = rows.map((r) => `
-    <tr><td>${r.seq}</td><td>${new Date(r.created_at).toLocaleString()}</td><td>${esc(r.incident_id)}</td>
-    <td>${esc(r.responder_id)}</td><td>${r.meds}</td><td>${r.procs}</td><td>${r.edits}</td>
+    <tr><td>${r.seq}</td><td>${new Date(r.updated_at).toLocaleString()}</td><td>${esc(r.incident_id)}</td>
+    <td>${esc(r.responder_id)}</td><td>${r.meds}</td><td>${r.procs}</td>
+    <td>${r.versions}${r.branches > 1 ? ` <span class="badge branch">${r.branches} branches</span>` : ""}</td>
     <td class="hash">${r.hash.slice(0, 16)}…</td>
-    <td><a href="/records/${r.id}/report" target="_blank">report</a> · <a href="/api/records/${r.id}/fhir" target="_blank">json</a></td></tr>`).join("")
+    <td class="actions"><button class="link" data-hist="${r.id}">History</button> · <button class="link" data-amend="${r.id}">Amend</button> ·
+      <a href="/records/${r.id}/report" target="_blank">report</a> · <a href="/api/records/${r.id}/fhir" target="_blank">json</a></td></tr>`).join("")
     || `<tr><td colspan="9" class="muted">No signed records yet.</td></tr>`;
+}
+$("#t-history").addEventListener("click", (e) => {
+  const t = e.target;
+  if (t.dataset.hist) openHistory(t.dataset.hist);
+  if (t.dataset.amend) startAmend(t.dataset.amend);
+});
+
+// ---------- version graph ----------
+let hist = null, selected = null;
+const fmtTime = (iso) => new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+function diffTable(changes) {  // rows from the server's describe_edits: {label, before, after, change}
+  if (!changes.length) return `<p class="muted">No clinical changes.</p>`;
+  return `<table><tbody>${changes.map((c) => `<tr><td>${esc(c.label)}${c.change !== "changed" ? ` <span class="muted">(${c.change})</span>` : ""}</td>
+    <td><span class="diff-old">${esc(c.before)}</span> → <span class="diff-new">${esc(c.after)}</span></td></tr>`).join("")}</tbody></table>`;
+}
+
+async function openHistory(id, select) {
+  hist = await api(`/api/records/${id}/history`);
+  selected = select || (hist.versions.some((v) => v.id === id) ? id : hist.current);
+  renderHistory();
+  const dlg = $("#hist-dlg");
+  if (!dlg.open) dlg.showModal();
+}
+$("#hist-close").onclick = () => $("#hist-dlg").close();
+$("#hist-dlg").addEventListener("click", (e) => { if (e.target.id === "hist-dlg") e.target.close(); });
+
+function layoutGraph(h) {
+  // Tidy tree, git-style: depth along x, each branch on its own row; a parent shares its first child's row.
+  const byId = Object.fromEntries(h.versions.map((v) => [v.id, v]));
+  const pos = {};
+  let row = 0;
+  (function place(id, depth) {
+    const kids = [...byId[id].children].sort((a, b) => byId[a].seq - byId[b].seq);
+    if (!kids.length) { pos[id] = { x: depth, y: row++ }; return; }
+    kids.forEach((k) => place(k, depth + 1));
+    pos[id] = { x: depth, y: pos[kids[0]].y };
+  })(h.versions[0].id, 0);
+  return pos;
+}
+
+function renderHistory() {
+  const h = hist, byId = Object.fromEntries(h.versions.map((v) => [v.id, v]));
+  const n = h.versions.length, branches = h.versions.filter((v) => !v.children.length).length;
+  $("#hist-title").textContent = `${h.incident_id} · history`;
+  $("#hist-sub").textContent = `${n} version${n > 1 ? "s" : ""} · ${branches} branch${branches > 1 ? "es" : ""} · current ${h.current_label}`;
+
+  const pos = layoutGraph(h), DX = 120, DY = 70, PAD = 34;
+  const maxX = Math.max(...Object.values(pos).map((p) => p.x)), maxY = Math.max(...Object.values(pos).map((p) => p.y));
+  const P = (id) => ({ x: PAD + pos[id].x * DX, y: PAD + pos[id].y * DY });
+  const edges = h.versions.filter((v) => v.parent).map((v) => {
+    const a = P(v.parent), b = P(v.id), r = 15;
+    const d = a.y === b.y ? `M${a.x + r},${a.y} L${b.x - r - 4},${b.y}`
+      : `M${a.x},${a.y + r} C${a.x},${b.y} ${a.x + DX / 2},${b.y} ${b.x - r - 4},${b.y}`;
+    return `<path class="edge" d="${d}" marker-end="url(#arrow)"/>`;
+  }).join("");
+  const nodes = h.versions.map((v) => {
+    const p = P(v.id);
+    return `<g class="node ${v.is_current ? "current" : ""} ${v.id === selected ? "selected" : ""}" data-v="${v.id}">
+      <circle cx="${p.x}" cy="${p.y}" r="15"><title>${v.label} · ${esc(v.reason || "original")}</title></circle>
+      <text class="lbl in" x="${p.x}" y="${p.y + 4}" text-anchor="middle">${v.label}</text>
+      <text class="sub" x="${p.x}" y="${p.y + 32}" text-anchor="middle">${v.hash.slice(0, 7)}</text></g>`;
+  }).join("");
+  const svg = $("#hist-graph");
+  svg.setAttribute("width", PAD * 2 + maxX * DX + 20);
+  svg.setAttribute("height", PAD * 2 + maxY * DY + 14);
+  svg.innerHTML = `<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="currentColor" style="color:var(--faint)"/></marker></defs>${edges}${nodes}`;
+  svg.querySelectorAll(".node").forEach((g) => g.addEventListener("click", () => { selected = g.dataset.v; renderHistory(); }));
+
+  const v = byId[selected];
+  const others = h.versions.filter((o) => o.id !== v.id);
+  $("#hist-detail").innerHTML = `
+    <h4>${v.label} ${v.is_current ? `<span class="badge" style="background:var(--accent-soft);color:var(--accent)">current</span>` : ""}</h4>
+    <dl>
+      <dt>Type</dt><dd>${v.kind === "create" ? "Original signed record" : `Amendment of ${v.parent_label}`}</dd>
+      <dt>Signed</dt><dd>${fmtTime(v.created_at)} by ${esc(v.responder_id)}</dd>
+      ${v.reason ? `<dt>Reason</dt><dd>${esc(v.reason)}</dd>` : ""}
+      <dt>Content</dt><dd>${v.meds} medication(s) · ${v.procs} procedure(s)</dd>
+      <dt>Hash</dt><dd class="hash">${v.hash}</dd>
+      ${v.parent ? `<dt>Parent hash</dt><dd class="hash">${v.parent_hash}</dd>` : ""}
+    </dl>
+    <b>${v.kind === "create" ? "Responder edits to the machine draft" : `Changes from ${v.parent_label}`}</b>
+    ${diffTable(v.changes)}
+    ${others.length ? `<div class="hist-actions"><label class="inline">Compare with
+      <select id="cmp">${["", ...others.map((o) => o.id)].map((id) => `<option value="${id}">${id ? byId[id].label : "—"}</option>`).join("")}</select></label></div>
+      <div id="cmp-out"></div>` : ""}
+    <div class="hist-actions">
+      <a href="/records/${v.id}/report" target="_blank"><button>Open report</button></a>
+      <button id="h-amend">${v.is_current ? "Amend" : "Amend from this version (new branch)"}</button>
+    </div>
+    ${v.is_current ? "" : `<div class="hist-actions">
+      <input id="h-reason" placeholder="Reason for making ${v.label} current">
+      <button class="primary" id="h-switch">Make ${v.label} current</button></div>`}`;
+
+  $("#h-amend").onclick = () => { $("#hist-dlg").close(); startAmend(v.id); };
+  if ($("#cmp")) $("#cmp").onchange = async (e) => {
+    if (!e.target.value) { $("#cmp-out").innerHTML = ""; return; }
+    const d = await api(`/api/records/${v.id}/diff/${e.target.value}`);
+    $("#cmp-out").innerHTML = `<p class="small muted">From ${v.label} to ${byId[e.target.value].label}:</p>${diffTable(d.changes)}`;
+  };
+  if ($("#h-switch")) $("#h-switch").onclick = async () => {
+    const reason = $("#h-reason").value.trim();
+    if (!reason) { $("#h-reason").focus(); return; }
+    try {
+      const r = await api(`/api/records/${v.id}/switch`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ responder_id: $("#responder").value, reason, target: v.id }),
+      });
+      hist = r.history; renderHistory(); loadHistory(); refreshStatus();
+    } catch (err) { alert(err.message); }
+  };
+
+  const evText = (e) => e.kind === "create" ? `Created ${e.version}`
+    : e.kind === "amend" ? `Amended ${e.from} → ${e.version}` : `Made ${e.version} current (was ${e.from})`;
+  $("#hist-events tbody").innerHTML = [...h.events].reverse().map((e) => `
+    <tr><td>#${e.seq}</td><td>${fmtTime(e.created_at)}</td><td><b>${evText(e)}</b></td>
+    <td>${esc(e.responder_id)}</td><td>${esc(e.reason || "")}</td><td class="hash">${e.hash.slice(0, 12)}…</td></tr>`).join("");
 }
 $("#verify").onclick = async () => {
   const v = await api("/api/audit/verify");
   $("#verify-result").innerHTML = v.ok
-    ? `<span class="verify-ok">✓ Chain intact — ${v.count} records, head ${v.head.slice(0, 16)}…</span>`
-    : `<span class="verify-bad">✗ Chain broken at record ${esc(v.broken_at)}: ${esc(v.reason)}</span>`;
+    ? `<span class="verify-ok">✓ Chain and version graph intact — ${v.records} records, ${v.versions} versions, ${v.switches} switch event(s), head ${v.head.slice(0, 16)}…</span>`
+    : `<span class="verify-bad">✗ Chain broken at entry ${esc(v.broken_at)}: ${esc(v.reason)}</span>`;
   refreshStatus();
 };
 
@@ -261,6 +436,7 @@ function resetEntry() {
   $("#note").value = "";
   noteTime = null; $("#note-time").value = "";
   asrMeta = null; draft = null; rec = null; modelInfo = {};
+  endAmend();
   $("#asr-info").textContent = ""; $("#extract-info").textContent = ""; $("#rec-timer").textContent = "00:00";
   $("#review-body").hidden = true; $("#review-empty").hidden = false;
   $("#signed").hidden = true; $("#warn-count").textContent = "";

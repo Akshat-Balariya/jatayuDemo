@@ -3,7 +3,7 @@ from datetime import datetime
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from . import config
+from . import audit, config
 
 _env = Environment(
     loader=FileSystemLoader(config.ROOT / "app" / "templates"),
@@ -24,5 +24,7 @@ _env.filters["hm"] = lambda v: (d.strftime("%H:%M") if (d := _parse(v)) else (v 
 
 
 def render(rec: dict) -> str:
-    edited = {e["field"].split(".")[0] for e in rec.get("edits") or []}
-    return _env.get_template("report.html").render(rec=rec, f=rec["final"], edited=edited)
+    changes = audit.describe_edits(rec.get("edits"))
+    edited = {e["field"].split(".")[0] for e in rec.get("edits") or []
+              if e["field"].rsplit(".", 1)[-1] not in audit.HIDDEN_FIELDS}
+    return _env.get_template("report.html").render(rec=rec, f=rec["final"], edited=edited, changes=changes)
